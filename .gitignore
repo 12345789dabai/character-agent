@@ -7,6 +7,11 @@ memory_db/
 # 短期记忆（对话历史）
 chat_history.db
 
+# PyInstaller 打包输出
+dist/
+build/
+*.spec
+
 # Python 缓存
 __pycache__/
 *.pyc
