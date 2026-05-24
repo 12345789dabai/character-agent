@@ -5,6 +5,11 @@ import webbrowser
 import threading
 import time
 import requests
+
+# Fix: --noconsole 模式下 sys.stderr 为 None，uvicorn 会崩溃
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 import uvicorn
 
 # 确保工作目录在 exe 所在位置（打包后也生效）
@@ -32,4 +37,22 @@ def open_browser_when_ready():
 
 if __name__ == "__main__":
     threading.Thread(target=open_browser_when_ready, daemon=True).start()
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(
+        app, host="127.0.0.1", port=8000,
+        log_config={
+            "version": 1,
+            "formatters": {
+                "default": {"format": "%(asctime)s %(message)s"},
+                "access": {"format": "%(asctime)s %(message)s"},
+            },
+            "handlers": {
+                "default": {"class": "logging.StreamHandler", "formatter": "default", "stream": "ext://sys.stdout"},
+                "access": {"class": "logging.StreamHandler", "formatter": "access", "stream": "ext://sys.stdout"},
+            },
+            "root": {"level": "WARNING", "handlers": ["default"]},
+            "loggers": {
+                "uvicorn": {"level": "INFO", "handlers": ["default"]},
+                "uvicorn.access": {"level": "WARNING", "handlers": ["access"]},
+            },
+        },
+    )
