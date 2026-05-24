@@ -3,7 +3,6 @@ Web 服务器 — 后台任务 + 聊天界面 API
 """
 import json
 import os
-from pathlib import Path
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
@@ -25,9 +24,8 @@ chat_db: ChatDB | None = None
 llm: LLM | None = None
 _settings: dict | None = None
 
-DB_DIR = Path(__file__).parent
-SETTINGS_FILE = DB_DIR / "user_settings.json"
-HISTORY_DB = str(DB_DIR / "chat_history.db")
+SETTINGS_FILE = BASE_DIR / "user_settings.json"
+HISTORY_DB = str(BASE_DIR / "chat_history.db")
 
 app = FastAPI(title="永久角色对话 Agent")
 
@@ -421,7 +419,7 @@ def _extract_memory_background():
 # ============================================================
 # 静态文件
 # ============================================================
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory=str(DATA_DIR / "static"), html=True), name="static")
 
 
 if __name__ == "__main__":

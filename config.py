@@ -1,7 +1,15 @@
+import sys
 from pathlib import Path
 
-BASE_DIR = Path(__file__).parent
-CHARACTERS_DIR = BASE_DIR / "characters"
+# 打包后数据文件在 sys._MEIPASS，用户数据在 exe 所在位置
+if getattr(sys, 'frozen', False):
+    DATA_DIR = Path(sys._MEIPASS)   # 打包的资源文件（static, characters）
+    BASE_DIR = Path(sys.executable).parent  # 用户数据（配置，数据库）
+else:
+    DATA_DIR = Path(__file__).parent
+    BASE_DIR = DATA_DIR
+
+CHARACTERS_DIR = DATA_DIR / "characters"
 MEMORY_DIR = str(BASE_DIR / "memory_db")
 
 # ---------- LLM 配置 ----------
