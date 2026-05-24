@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>永久角色对话</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; height: 100vh; display: flex; background: #f5f5f5; }
+
+/* ===== 主聊天区 ===== */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+header {
+  padding: 14px 20px; background: #fff; border-bottom: 1px solid #e0e0e0;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+header h1 { font-size: 17px; font-weight: 600; }
+#memory-badge { font-size: 12px; color: #888; background: #f0f0f0; padding: 2px 10px; border-radius: 10px; }
+.header-btn {
+  border: 1px solid #ddd; background: #fff; padding: 6px 12px; border-radius: 6px;
+  cursor: pointer; font-size: 13px; color: #555; transition: background .15s;
+}
+.header-btn:hover { background: #f0f0f0; }
+#btn-memory { margin-left: auto; }
+#btn-settings { font-size: 18px; padding: 4px 10px; line-height: 1; }
+
+#messages {
+  flex: 1; overflow-y: auto; padding: 20px 20px; display: flex; flex-direction: column; gap: 14px;
+}
+.msg {
+  max-width: 78%; padding: 11px 15px; border-radius: 12px; line-height: 1.6;
+  font-size: 15px; white-space: pre-wrap; word-break: break-word; animation: fadeIn .2s;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.msg.user { align-self: flex-end; background: #007aff; color: #fff; border-bottom-right-radius: 4px; }
+.msg.char { align-self: flex-start; background: #fff; color: #222; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+.msg.system { align-self: center; background: none; color: #999; font-size: 12px; padding: 4px 8px; }
+.msg .name { font-size: 12px; font-weight: 600; margin-bottom: 3px; color: #666; }
+.msg.user .name { color: rgba(255,255,255,.75); }
+
+#typing {
+  display: none; align-self: flex-start; background: #fff; padding: 12px 18px;
+  border-radius: 12px; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.07);
+}
+#typing .dot { display: inline-block; width: 7px; height: 7px; background: #aaa; border-radius: 50%; margin: 0 2px; animation: bounce 1.3s infinite; }
+#typing .dot:nth-child(2) { animation-delay: .2s; }
+#typing .dot:nth-child(3) { animation-delay: .4s; }
+@keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
+
+#input-area {
+  padding: 14px 20px; background: #fff; border-top: 1px solid #e0e0e0;
+  display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0;
+}
+#input-area textarea {
+  flex: 1; border: 1px solid #ddd; border-radius: 10px; padding: 11px 14px; font-size: 15px;
+  resize: none; outline: none; font-family: inherit; line-height: 1.5; max-height: 140px;
+}
+#input-area textarea:focus { border-color: #007aff; }
+#input-area button {
+  background: #007aff; color: #fff; border: none; border-radius: 10px; padding: 11px 22px;
+  font-size: 15px; cursor: pointer; transition: opacity .15s;
+}
+#input-area button:disabled { opacity: .4; cursor: not-allowed; }
+#input-area button:hover:not(:disabled) { opacity: .85; }
+
+/* ===== 侧边栏 ===== */
+#sidebar {
+  width: 340px; background: #fff; border-left: 1px solid #e0e0e0;
+  display: flex; flex-direction: column; flex-shrink: 0; transition: margin .25s;
+}
+#sidebar.hidden { margin-right: -340px; }
+#sidebar h2 { padding: 16px 20px; font-size: 15px; border-bottom: 1px solid #e0e0e0; }
+#memory-list { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.memory-card {
+  background: #f8f9fa; border-radius: 8px; padding: 11px 13px; font-size: 14px; line-height: 1.5; border: 1px solid #eee;
+}
+.memory-card .time { font-size: 11px; color: #999; margin-bottom: 3px; }
+.memory-card .summary { color: #333; }
+.memory-card .facts { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.memory-card .facts span { background: #e8f0fe; color: #1a73e8; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.memory-card .del { float: right; border: none; background: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px; }
+.memory-card .del:hover { color: #e33; }
+.empty-memories { color: #999; text-align: center; padding: 40px 20px; font-size: 14px; }
+
+/* ===== 启动/遮罩层 ===== */
+#loading-screen {
+  position: fixed; inset: 0; background: #fff; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; z-index: 100; gap: 16px;
+}
+#loading-screen .spinner {
+  width: 30px; height: 30px; border: 3px solid #e0e0e0; border-top: 3px solid #007aff;
+  border-radius: 50%; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-screen .err { color: #e33; font-size: 14px; }
+
+/* ===== 设置弹窗 ===== */
+#settings-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200;
+  display: flex; align-items: center; justify-content: center;
+}
+#settings-overlay.hidden { display: none; }
+#settings-box {
+  background: #fff; border-radius: 14px; width: 420px; max-width: 90vw;
+  padding: 28px 32px; box-shadow: 0 8px 40px rgba(0,0,0,.15);
+}
+#settings-box h2 { font-size: 18px; margin-bottom: 20px; }
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 5px; }
+.form-group input, .form-group select {
+  width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 8px;
+  font-size: 14px; outline: none; font-family: inherit;
+}
+.form-group input:focus, .form-group select:focus { border-color: #007aff; }
+.form-hint { font-size: 12px; color: #999; margin-top: 3px; }
+#settings-box .actions { display: flex; gap: 10px; margin-top: 22px; }
+#settings-box .actions button {
+  flex: 1; padding: 10px; border-radius: 8px; font-size: 14px; cursor: pointer; border: none; transition: opacity .15s;
+}
+.btn-primary { background: #007aff; color: #fff; }
+.btn-primary:hover { opacity: .85; }
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+.btn-secondary { background: #f0f0f0; color: #333; }
+.btn-secondary:hover { background: #e5e5e5; }
+#settings-status { margin-top: 12px; font-size: 13px; text-align: center; }
+#settings-status.ok { color: #34c759; }
+#settings-status.err { color: #e33; }
+</style>
+</head>
+<body>
+
+<!-- 启动界面 -->
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <div>正在连接服务器...</div>
+</div>
+
+<!-- 设置弹窗 -->
+<div id="settings-overlay">
+  <div id="settings-box">
+    <h2>⚙️ API 设置</h2>
+    <div class="form-group">
+      <label>服务商</label>
+      <select id="s-provider" onchange="onProviderChange()">
+        <option value="openai">OpenAI 兼容</option>
+        <option value="ollama">Ollama（本地）</option>
+      </select>
+    </div>
+    <div class="form-group" id="s-key-group">
+      <label>API Key</label>
+      <input id="s-key" type="password" placeholder="sk-..." autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label>模型</label>
+      <input id="s-model" placeholder="gpt-4o-mini">
+      <div class="form-hint" id="s-model-hint"></div>
+    </div>
+    <div class="form-group">
+      <label>接口地址</label>
+      <input id="s-url" placeholder="https://api.openai.com/v1">
+      <div class="form-hint" id="s-url-hint"></div>
+    </div>
+    <div id="settings-status"></div>
+    <div class="actions">
+      <button class="btn-primary" id="btn-save" onclick="saveSettings()">保存并连接</button>
+      <button class="btn-secondary" id="btn-close-settings" onclick="closeSettings()">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 主聊天区 -->
+<div id="main">
+  <header>
+    <h1 id="char-name">—</h1>
+    <span id="memory-badge">0 条记忆</span>
+    <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
+    <button class="header-btn" id="btn-settings" onclick="openSettings()">⚙</button>
+  </header>
+
+  <div id="messages"><div class="msg system">加载中...</div></div>
+  <div id="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+
+  <div id="input-area">
+    <textarea id="input" rows="1" placeholder="输入消息..." onkeydown="onKey(event)"></textarea>
+    <button id="send-btn" onclick="send()">发送</button>
+  </div>
+</div>
+
+<!-- 侧边栏 -->
+<div id="sidebar" class="hidden">
+  <h2>长期记忆 <span id="sidebar-count" style="font-weight:normal;color:#999;font-size:13px;"></span></h2>
+  <div id="memory-list"><div class="empty-memories">点击「记忆」按钮查看</div></div>
+</div>
+
+<script>
+// ===== 状态 =====
+let isLoading = false;
+let configured = false;
+
+// ===== 启动 =====
+window.onload = async () => {
+  try {
+    const res = await fetch('/api/status');
+    const data = await res.json();
+
+    if (data.character) {
+      document.getElementById('char-name').textContent = data.character;
+    }
+
+    if (data.configured) {
+      configured = true;
+      updateBadge(data.memory_count);
+      showMessage('system', '💬 ' + data.greeting);
+      // 恢复上次的对话历史
+      loadHistory();
+      document.getElementById('loading-screen').style.display = 'none';
+      document.getElementById('input').focus();
+    } else {
+      // 没配置过 — 强制打开设置
+      document.getElementById('loading-screen').style.display = 'none';
+      loadSettings();
+      document.getElementById('settings-overlay').classList.remove('hidden');
+      document.getElementById('btn-close-settings').style.display = 'none';
+    }
+  } catch (e) {
+    document.querySelector('#loading-screen .spinner').style.display = 'none';
+    document.querySelector('#loading-screen').innerHTML +=
+      '<div class="err">无法连接服务器<br><small>' + e.message + '</small></div>';
+  }
+};
+
+// ===== 设置 =====
+const PRESETS = {
+  openai: { model: 'gpt-4o-mini', url: 'https://api.openai.com/v1', hintModel: '如 gpt-4o-mini、gpt-4o', hintUrl: 'OpenAI 官方或兼容服务地址' },
+  ollama: { model: 'qwen2.5', url: 'http://localhost:11434', hintModel: '如 qwen2.5、llama3', hintUrl: 'Ollama 服务地址，默认 http://localhost:11434' },
+};
+
+function onProviderChange() {
+  const p = document.getElementById('s-provider').value;
+  const preset = PRESETS[p];
+  document.getElementById('s-model').placeholder = preset.model;
+  document.getElementById('s-model-hint').textContent = preset.hintModel;
+  document.getElementById('s-url').placeholder = preset.url;
+  document.getElementById('s-url-hint').textContent = preset.hintUrl;
+  // 选 Ollama 时隐藏 API Key
+  document.getElementById('s-key-group').style.display = p === 'ollama' ? 'none' : 'block';
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const s = await res.json();
+    document.getElementById('s-provider').value = s.provider || 'openai';
+    document.getElementById('s-key').value = '';
+    document.getElementById('s-model').value = s.model || '';
+    document.getElementById('s-url').value = s.base_url || '';
+    // 如果已经有 key 回填，显示一个提示
+    if (s.api_key && s.api_key !== '') {
+      document.getElementById('s-key').placeholder = s.api_key;
+    }
+    onProviderChange();
+  } catch (_) {}
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('btn-save');
+  btn.disabled = true;
+  btn.textContent = '连接中...';
+  document.getElementById('settings-status').textContent = '';
+  document.getElementById('settings-status').className = '';
+
+  const provider = document.getElementById('s-provider').value;
+  let apiKey = document.getElementById('s-key').value;
+  const model = document.getElementById('s-model').value || PRESETS[provider].model;
+  const baseUrl = document.getElementById('s-url').value || PRESETS[provider].url;
+
+  // 如果 key 是脱敏显示的占位符，清空（让后端用已有的）
+  if (apiKey.includes('***')) apiKey = '';
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '保存失败');
+
+    configured = true;
+    document.getElementById('settings-overlay').classList.add('hidden');
+    document.getElementById('btn-close-settings').style.display = 'block';
+
+    const statusEl = document.getElementById('settings-status');
+    statusEl.textContent = '✅ ' + data.message;
+    statusEl.className = 'ok';
+
+    // 首次配置时解锁 UI
+    if (document.getElementById('char-name').textContent === '—') {
+      const s = await fetch('/api/status').then(r => r.json());
+      if (s.character) document.getElementById('char-name').textContent = s.character;
+      showMessage('system', '💬 ' + (s.greeting || '配置完成，开始聊天吧！'));
+      updateBadge(s.memory_count);
+      document.getElementById('input').focus();
+    }
+  } catch (e) {
+    const statusEl = document.getElementById('settings-status');
+    statusEl.textContent = '❌ ' + e.message;
+    statusEl.className = 'err';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存并连接';
+  }
+}
+
+function openSettings() {
+  document.getElementById('settings-overlay').classList.remove('hidden');
+  document.getElementById('btn-close-settings').style.display = 'block';
+  loadSettings();
+}
+
+function closeSettings() {
+  document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+// ===== 发送消息（流式） =====
+async function send() {
+  const input = document.getElementById('input');
+  const msg = input.value.trim();
+  if (!msg || isLoading) return;
+  if (!configured) { openSettings(); return; }
+
+  input.value = '';
+  input.style.height = 'auto';
+  showMessage('user', msg);
+
+  isLoading = true;
+  document.getElementById('send-btn').disabled = true;
+  scrollBottom();
+
+  // 创建空白角色消息气泡，后面逐字追加
+  const charMsg = document.createElement('div');
+  charMsg.className = 'msg char';
+  const charName = document.getElementById('char-name').textContent;
+  charMsg.innerHTML = '<div class="name">' + esc(charName) + '</div>';
+  document.getElementById('messages').appendChild(charMsg);
+
+  try {
+    const res = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || res.statusText);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // 按行解析 SSE
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 不完整的行留在 buffer
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+        if (data.text) {
+          // 追加文本到气泡
+          const textEl = charMsg.querySelector('.text') || (() => {
+            const t = document.createElement('span');
+            t.className = 'text';
+            charMsg.appendChild(t);
+            return t;
+          })();
+          textEl.textContent += data.text;
+          scrollBottom();
+        }
+
+        if (data.error) {
+          charMsg.remove();
+          showMessage('system', '⚠️ ' + data.error);
+        }
+
+        if (data.done) {
+          updateBadge(data.memory_count);
+        }
+      }
+    }
+  } catch (e) {
+    if (charMsg.parentNode) charMsg.remove();
+    showMessage('system', '⚠️ ' + e.message);
+  } finally {
+    isLoading = false;
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('input').focus();
+    scrollBottom();
+  }
+}
+
+function onKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+}
+
+// ===== UI 辅助 =====
+function showMessage(type, content, name) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + type;
+  if (name) el.innerHTML = '<div class="name">' + esc(name) + '</div>' + esc(content);
+  else el.textContent = content;
+  document.getElementById('messages').appendChild(el);
+  scrollBottom();
+}
+
+async function loadHistory() {
+  try {
+    const res = await fetch('/api/history');
+    const msgs = await res.json();
+    for (const msg of msgs) {
+      if (msg.role === 'user') showMessage('user', msg.content);
+      else if (msg.role === 'assistant') showMessage('char', msg.content, document.getElementById('char-name').textContent);
+    }
+  } catch (_) {}
+}
+
+function updateBadge(count) {
+  document.getElementById('memory-badge').textContent = count + ' 条记忆';
+  document.getElementById('sidebar-count').textContent = '（' + count + ' 条）';
+}
+
+function scrollBottom() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+// ===== 侧边栏 =====
+let sidebarLoaded = false;
+function toggleSidebar() {
+  const panel = document.getElementById('sidebar');
+  panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) {
+    loadMemories();
+  }
+}
+
+async function loadMemories() {
+  const list = document.getElementById('memory-list');
+  list.innerHTML = '<div class="empty-memories">加载中...</div>';
+  try {
+    const res = await fetch('/api/memories');
+    const mems = await res.json();
+    if (!mems.length) {
+      list.innerHTML = '<div class="empty-memories">还没有长期记忆<br><small>多聊几轮会自动生成</small></div>';
+      return;
+    }
+    list.innerHTML = '';
+    mems.forEach(m => {
+      const card = document.createElement('div');
+      card.className = 'memory-card';
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'del';
+      delBtn.textContent = '×';
+      delBtn.onclick = () => deleteMemory(m.id, card);
+
+      const time = document.createElement('div');
+      time.className = 'time';
+      time.textContent = m.timestamp ? m.timestamp.slice(0, 16).replace('T', ' ') : '';
+
+      const summary = document.createElement('div');
+      summary.className = 'summary';
+      summary.textContent = m.summary;
+
+      card.appendChild(delBtn);
+      card.appendChild(time);
+      card.appendChild(summary);
+
+      if (m.facts && m.facts.length) {
+        const facts = document.createElement('div');
+        facts.className = 'facts';
+        m.facts.forEach(f => {
+          const span = document.createElement('span');
+          span.textContent = f;
+          facts.appendChild(span);
+        });
+        card.appendChild(facts);
+      }
+
+      list.appendChild(card);
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="empty-memories">加载失败：' + e.message + '</div>';
+  }
+}
+
+async function deleteMemory(id, cardEl) {
+  if (!confirm('删除这条记忆？')) return;
+  try {
+    await fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' });
+    cardEl.remove();
+    updateBadge(document.querySelectorAll('.memory-card').length);
+  } catch (_) { alert('删除失败'); }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// 输入框自动高度
+document.getElementById('input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+});
+</script>
+</body>
+</html>
