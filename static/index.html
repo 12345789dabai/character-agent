@@ -467,40 +467,70 @@ async function loadMemories() {
       list.innerHTML = '<div class="empty-memories">还没有长期记忆<br><small>多聊几轮会自动生成</small></div>';
       return;
     }
-    list.innerHTML = '';
+
+    // 按日期分组
+    const groups = {};
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const yesterdayStr = new Date(now - 86400000).toISOString().slice(0, 10);
+
     mems.forEach(m => {
-      const card = document.createElement('div');
-      card.className = 'memory-card';
+      const date = m.timestamp ? m.timestamp.slice(0, 10) : '';
+      const key = date || '未知';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(m);
+    });
 
-      const delBtn = document.createElement('button');
-      delBtn.className = 'del';
-      delBtn.textContent = '×';
-      delBtn.onclick = () => deleteMemory(m.id, card);
+    list.innerHTML = '';
+    const dateLabels = Object.keys(groups).sort((a, b) => b.localeCompare(a));
 
-      const time = document.createElement('div');
-      time.className = 'time';
-      time.textContent = m.timestamp ? m.timestamp.slice(0, 16).replace('T', ' ') : '';
+    dateLabels.forEach(date => {
+      // 日期标题
+      let label;
+      if (date === todayStr) label = '📌 今天';
+      else if (date === yesterdayStr) label = '📌 昨天';
+      else if (date.slice(0, 4) === todayStr.slice(0, 4)) label = date.slice(5);
+      else label = date;
 
-      const summary = document.createElement('div');
-      summary.className = 'summary';
-      summary.textContent = m.summary;
+      const title = document.createElement('div');
+      title.style.cssText = 'font-size:12px;color:#999;margin:12px 0 6px;font-weight:500;';
+      title.textContent = label;
+      list.appendChild(title);
 
-      card.appendChild(delBtn);
-      card.appendChild(time);
-      card.appendChild(summary);
+      groups[date].forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'memory-card';
 
-      if (m.facts && m.facts.length) {
-        const facts = document.createElement('div');
-        facts.className = 'facts';
-        m.facts.forEach(f => {
-          const span = document.createElement('span');
-          span.textContent = f;
-          facts.appendChild(span);
-        });
-        card.appendChild(facts);
-      }
+        const delBtn = document.createElement('button');
+        delBtn.className = 'del';
+        delBtn.textContent = '×';
+        delBtn.onclick = () => deleteMemory(m.id, card);
 
-      list.appendChild(card);
+        const time = document.createElement('div');
+        time.className = 'time';
+        time.textContent = m.timestamp ? m.timestamp.slice(11, 16) : '';
+
+        const summary = document.createElement('div');
+        summary.className = 'summary';
+        summary.textContent = m.summary;
+
+        card.appendChild(delBtn);
+        card.appendChild(time);
+        card.appendChild(summary);
+
+        if (m.facts && m.facts.length) {
+          const facts = document.createElement('div');
+          facts.className = 'facts';
+          m.facts.forEach(f => {
+            const span = document.createElement('span');
+            span.textContent = f;
+            facts.appendChild(span);
+          });
+          card.appendChild(facts);
+        }
+
+        list.appendChild(card);
+      });
     });
   } catch (e) {
     list.innerHTML = '<div class="empty-memories">加载失败：' + e.message + '</div>';
