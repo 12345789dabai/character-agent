@@ -133,7 +133,12 @@ header {
 <!-- 启动界面 -->
 <div id="loading-screen">
   <div class="spinner"></div>
-  <div>正在连接服务器...</div>
+  <div id="loading-text">正在连接服务器...</div>
+  <div id="loading-steps" style="margin-top:12px;font-size:13px;color:#999;line-height:1.8;">
+    <div id="step-1">○ 连接服务</div>
+    <div id="step-2">○ 加载角色</div>
+    <div id="step-3">○ 准备就绪</div>
+  </div>
 </div>
 
 <!-- 设置弹窗 -->
@@ -149,7 +154,10 @@ header {
     </div>
     <div class="form-group" id="s-key-group">
       <label>API Key</label>
-      <input id="s-key" type="password" placeholder="sk-..." autocomplete="off">
+      <div style="display:flex;gap:6px;">
+        <input id="s-key" type="password" placeholder="sk-..." autocomplete="off" style="flex:1;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;">
+        <button onclick="pasteKey()" title="从剪贴板粘贴检测" style="padding:9px 12px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">📋 粘贴</button>
+      </div>
     </div>
     <div class="form-group">
       <label>模型</label>
@@ -161,6 +169,7 @@ header {
       <input id="s-url" placeholder="https://api.openai.com/v1">
       <div class="form-hint" id="s-url-hint"></div>
     </div>
+    <div id="s-status-msg" style="margin-top:8px;font-size:13px;text-align:center;"></div>
     <div id="settings-status"></div>
     <div class="actions">
       <button class="btn-primary" id="btn-save" onclick="saveSettings()">保存并连接</button>
@@ -255,16 +264,25 @@ let configured = false;
 
 // ===== 启动 =====
 window.onload = async () => {
+  function setStep(n, text) {
+    const s = document.getElementById('step-' + n);
+    if (s) { s.innerHTML = '● ' + (text || s.textContent.slice(2)); s.style.color = '#333'; }
+    for (let i = 1; i < n; i++) {
+      const prev = document.getElementById('step-' + i);
+      if (prev) { prev.innerHTML = '✓ ' + (prev.dataset.text || prev.textContent.slice(2)); prev.style.color = '#34c759'; }
+    }
+  }
   try {
+    setStep(1, '连接服务...');
     const res = await fetch('/api/status');
-    const data = await res.json();
 
+    setStep(2, '加载角色...');
+    const data = await res.json();
     await loadCharDropdown(data.character);
 
     if (data.configured) {
       configured = true;
       updateBadge(data.memory_count);
-      // 久别重逢问候
       let greeting = data.greeting;
       if (data.last_message_time) {
         const diff = Date.now() - new Date(data.last_message_time).getTime();
@@ -273,8 +291,10 @@ window.onload = async () => {
         else if (hours >= 4 && hours < 24) greeting = '欢迎回来！' + greeting;
         else if (hours >= 24) greeting = '好久不见！' + greeting;
       }
+      setStep(3, '准备就绪');
       showMessage('system', '💬 ' + greeting);
       loadHistory();
+      await new Promise(r => setTimeout(r, 300));
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('input').focus();
     } else {
@@ -394,6 +414,24 @@ const PRESETS = {
   openai: { model: 'gpt-4o-mini', url: 'https://api.openai.com/v1', hintModel: '如 gpt-4o-mini、gpt-4o', hintUrl: 'OpenAI 官方或兼容服务地址' },
   ollama: { model: 'qwen2.5', url: 'http://localhost:11434', hintModel: '如 qwen2.5、llama3', hintUrl: 'Ollama 服务地址，默认 http://localhost:11434' },
 };
+
+async function pasteKey() {
+  try {
+    const text = await navigator.clipboard.readText();
+    const key = text.trim();
+    if (key && (key.startsWith('sk-') || key.startsWith('sk_'))) {
+      document.getElementById('s-key').value = key;
+      document.getElementById('s-status-msg').textContent = '✅ 已检测到 API Key';
+      document.getElementById('s-status-msg').className = 'ok';
+    } else {
+      document.getElementById('s-status-msg').textContent = '❌ 剪贴板内容不是有效的 API Key';
+      document.getElementById('s-status-msg').className = 'err';
+    }
+  } catch (e) {
+    document.getElementById('s-status-msg').textContent = '❌ 无法读取剪贴板（请手动粘贴）';
+    document.getElementById('s-status-msg').className = 'err';
+  }
+}
 
 function onProviderChange() {
   const p = document.getElementById('s-provider').value;
