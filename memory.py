@@ -8,22 +8,48 @@ from chromadb.utils import embedding_functions
 class MemoryStore:
     """长期记忆存储，基于 ChromaDB 向量数据库"""
 
-    def __init__(self, db_path: str, character_name: str):
-        self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="paraphrase-multilingual-MiniLM-L12-v2"
-        )
+    def __init__(self, db_path: str, character_name: str, api_config: dict | None = None):
+        # 选择嵌入方式：API 嵌入（无需本地模型）或本地嵌入
+        self._use_api_embedding = False
+        if api_config and api_config.get("provider") == "openai":
+            api_key = api_config.get("api_key", "")
+            base_url = api_config.get("base_url", "")
+            # 排除已知不支持 embedding 的服务商（DeepSeek 等）
+            if api_key and "deepseek" not in base_url:
+                try:
+                    self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+                        api_key=api_key,
+                        model_name="text-embedding-3-small",
+                    )
+                    self._use_api_embedding = True
+                except Exception:
+                    pass
+
+        if not self._use_api_embedding:
+            self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
+                model_name="paraphrase-multilingual-MiniLM-L12-v2"
+            )
+
         self.client = chromadb.PersistentClient(path=db_path)
         safe_name = re.sub(r'[^a-zA-Z0-9_-]', '', character_name) or 'default'
         self.collection_name = f"memories_{safe_name}"
 
+        # 尝试打开已有集合，嵌入冲突时沿用旧的
         try:
             self.collection = self.client.get_collection(
                 self.collection_name, embedding_function=self.embedding_fn
             )
+        except ValueError:
+            self.collection = self.client.get_collection(self.collection_name)
         except Exception:
-            self.collection = self.client.create_collection(
-                self.collection_name, embedding_function=self.embedding_fn
-            )
+            try:
+                self.collection = self.client.create_collection(
+                    self.collection_name, embedding_function=self.embedding_fn
+                )
+            except Exception:
+                self.collection = self.client.get_collection(
+                    self.collection_name, embedding_function=self.embedding_fn
+                )
 
     def add_memory(self, summary: str, facts: list[str], topics: list[str], supersedes: str | None = None):
         """存入一条记忆，supersedes 表示覆盖了哪条旧记忆的 ID"""

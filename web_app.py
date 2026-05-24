@@ -72,14 +72,7 @@ def startup():
     chat_db = ChatDB(HISTORY_DB)
     print(f"[就绪] 对话历史 {chat_db.count()} 条")
 
-    chars = Character.list_available()
-    if chars:
-        active_char = chars[0][1]
-        memory_store = MemoryStore(MEMORY_DIR, active_char.name)
-        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条")
-    else:
-        print("[警告] characters/ 下没有角色卡")
-
+    # 先加载设置，再创建记忆存储（支持 API 嵌入）
     saved = load_settings_from_file()
     if saved:
         try:
@@ -87,6 +80,15 @@ def startup():
             print(f"[设置] 已加载：{saved['provider']} / {saved['model']}")
         except Exception as e:
             print(f"[设置] 加载失败：{e}")
+
+    chars = Character.list_available()
+    if chars:
+        active_char = chars[0][1]
+        memory_store = MemoryStore(MEMORY_DIR, active_char.name, api_config=_settings)
+        mode = "API" if memory_store._use_api_embedding else "本地"
+        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 嵌入:{mode}")
+    else:
+        print("[警告] characters/ 下没有角色卡")
 
     print(f"[服务] http://127.0.0.1:8000")
 
@@ -176,6 +178,27 @@ def set_settings(body: SettingsBody):
 
     save_settings_to_file(s)
     return {"ok": True, "message": f"已切换到 {s['provider']} / {s['model']}"}
+
+
+@app.post("/api/settings/test")
+def test_settings(body: SettingsBody):
+    """测试 API 连接是否正常"""
+    test_key = body.api_key or _settings.get("api_key", "") if _settings else ""
+    test_model = body.model or _settings.get("model", "gpt-4o-mini") if _settings else "gpt-4o-mini"
+    test_url = body.base_url or _settings.get("base_url", "") if _settings else ""
+    test_provider = body.provider or _settings.get("provider", "openai") if _settings else "openai"
+
+    if not test_key and test_provider == "openai":
+        raise HTTPException(400, "请先输入 API Key")
+
+    test_llm = LLM(provider=test_provider, model=test_model, base_url=test_url, api_key=test_key)
+    try:
+        resp = test_llm.chat([{"role": "user", "content": "回复 OK 即可"}])
+        return {"ok": True, "message": "连接成功"}
+    except LLMError as e:
+        raise HTTPException(400, f"连接失败：{str(e)}")
+    except Exception as e:
+        raise HTTPException(400, f"连接失败：{str(e)}")
 
 
 @app.get("/api/characters")

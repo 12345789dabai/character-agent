@@ -171,7 +171,8 @@ header {
     </div>
     <div id="s-status-msg" style="margin-top:8px;font-size:13px;text-align:center;"></div>
     <div id="settings-status"></div>
-    <div class="actions">
+    <button class="btn-secondary" id="btn-test" onclick="testConnection()" style="width:100%;margin-top:8px;">测试连接</button>
+    <div class="actions" style="margin-top:10px;">
       <button class="btn-primary" id="btn-save" onclick="saveSettings()">保存并连接</button>
       <button class="btn-secondary" id="btn-close-settings" onclick="closeSettings()">取消</button>
     </div>
@@ -458,6 +459,33 @@ async function loadSettings() {
     }
     onProviderChange();
   } catch (_) {}
+}
+
+async function testConnection() {
+  const btn = document.getElementById('btn-test');
+  btn.disabled = true; btn.textContent = '测试中...';
+  document.getElementById('settings-status').textContent = '';
+  document.getElementById('settings-status').className = '';
+  const provider = document.getElementById('s-provider').value;
+  let apiKey = document.getElementById('s-key').value;
+  const model = document.getElementById('s-model').value || PRESETS[provider].model;
+  const baseUrl = document.getElementById('s-url').value || PRESETS[provider].url;
+  if (apiKey.includes('***')) apiKey = '';
+  try {
+    const res = await fetch('/api/settings/test', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl }),
+    });
+    const data = await res.json();
+    const el = document.getElementById('settings-status');
+    if (res.ok) { el.textContent = '✅ ' + data.message; el.className = 'ok'; }
+    else { el.textContent = '❌ ' + (data.detail || '失败'); el.className = 'err'; }
+  } catch (e) {
+    const el = document.getElementById('settings-status');
+    el.textContent = '❌ 请求失败'; el.className = 'err';
+  } finally {
+    btn.disabled = false; btn.textContent = '测试连接';
+  }
 }
 
 async function saveSettings() {
