@@ -28,10 +28,11 @@ class Character:
             )
 
         if memories:
-            base += "\n\n【你的历史记忆】\n"
+            base += "\n\n【你的历史记忆（按时间排序）】\n"
             for m in memories:
                 ts = m["timestamp"][:10]
-                base += f"• ({ts}) {m['summary']}\n"
+                prefix = "• (旧) " if m.get("superseded") else "• "
+                base += f"{prefix}({ts}) {m['summary']}\n"
 
         return base
 

@@ -60,15 +60,13 @@ class MemoryStore:
                 dist = results["distances"][0][i] if results.get("distances") else 0
                 if threshold is not None and dist > threshold:
                     continue
-                # 跳过已被覆盖的记忆
-                if meta.get("superseded_by"):
-                    continue
                 memories.append({
                     "timestamp": meta["timestamp"],
                     "summary": meta["summary"],
                     "facts": json.loads(meta["facts"]),
                     "topics": json.loads(meta["topics"]),
                     "distance": dist,
+                    "superseded": bool(meta.get("superseded_by")),
                 })
                 if len(memories) >= n_results:
                     break
@@ -93,21 +91,20 @@ class MemoryStore:
         return memories
 
     def get_all(self, limit: int = 50) -> list[dict]:
-        """获取所有未被覆盖的记忆（按时间倒序）"""
+        """获取所有记忆（按时间倒序）"""
         results = self.collection.get(limit=limit)
         memories = []
         if results.get("metadatas"):
             pairs = list(zip(results["ids"], results["metadatas"]))
             pairs.sort(key=lambda x: x[1].get("timestamp", ""), reverse=True)
             for mid, meta in pairs:
-                if meta.get("superseded_by"):
-                    continue
                 memories.append({
                     "id": mid,
                     "timestamp": meta.get("timestamp", ""),
                     "summary": meta.get("summary", ""),
                     "facts": json.loads(meta.get("facts", "[]")),
                     "topics": json.loads(meta.get("topics", "[]")),
+                    "superseded": bool(meta.get("superseded_by")),
                 })
         return memories
 
