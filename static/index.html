@@ -15,7 +15,6 @@ header {
   padding: 14px 20px; background: #fff; border-bottom: 1px solid #e0e0e0;
   display: flex; align-items: center; gap: 10px; flex-shrink: 0;
 }
-header h1 { font-size: 17px; font-weight: 600; }
 #memory-badge { font-size: 12px; color: #888; background: #f0f0f0; padding: 2px 10px; border-radius: 10px; }
 .header-btn {
   border: 1px solid #ddd; background: #fff; padding: 6px 12px; border-radius: 6px;
@@ -44,14 +43,6 @@ header h1 { font-size: 17px; font-weight: 600; }
 .msg .name { font-size: 12px; font-weight: 600; margin-bottom: 3px; color: #666; }
 .msg.user .name { color: rgba(255,255,255,.75); }
 
-#typing {
-  display: none; align-self: flex-start; background: #fff; padding: 12px 18px;
-  border-radius: 12px; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.07);
-}
-#typing .dot { display: inline-block; width: 7px; height: 7px; background: #aaa; border-radius: 50%; margin: 0 2px; animation: bounce 1.3s infinite; }
-#typing .dot:nth-child(2) { animation-delay: .2s; }
-#typing .dot:nth-child(3) { animation-delay: .4s; }
-@keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-6px); } }
 
 #input-area {
   padding: 14px 20px; background: #fff; border-top: 1px solid #e0e0e0;
@@ -190,7 +181,6 @@ header h1 { font-size: 17px; font-weight: 600; }
   </header>
 
   <div id="messages"><div class="msg system">加载中...</div></div>
-  <div id="typing"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
 
   <div id="input-area">
     <textarea id="input" rows="1" placeholder="输入消息..." onkeydown="onKey(event)"></textarea>
@@ -339,7 +329,6 @@ async function switchCharacter(name) {
     document.getElementById('messages').innerHTML = '';
     showMessage('system', '💬 ' + data.greeting);
     updateBadge(data.memory_count);
-    sidebarLoaded = false;
     document.getElementById('sidebar').classList.add('hidden');
     document.getElementById('input').focus();
   } catch (e) {
@@ -605,7 +594,6 @@ function scrollBottom() {
 }
 
 // ===== 侧边栏 =====
-let sidebarLoaded = false;
 function toggleSidebar() {
   const panel = document.getElementById('sidebar');
   panel.classList.toggle('hidden');
@@ -730,7 +718,6 @@ async function exportChat() {
 }
 
 // ===== 记忆手动管理 =====
-let allMemories = [];
 function showAddMemory() {
   document.getElementById('add-memory-overlay').classList.remove('hidden');
   document.getElementById('add-summary').value = '';

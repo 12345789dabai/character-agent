@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime
 import chromadb
 from chromadb.utils import embedding_functions
@@ -14,7 +15,6 @@ class MemoryStore:
         )
         self.client = chromadb.PersistentClient(path=db_path)
         # ChromaDB 集合名只允许 ASCII 字母数字和 ._-，去掉中文
-        import re
         safe_name = re.sub(r'[^a-zA-Z0-9_-]', '', character_name) or 'default'
         self.collection_name = f"memories_{safe_name}"
 
