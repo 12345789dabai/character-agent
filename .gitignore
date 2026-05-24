@@ -4,6 +4,9 @@ user_settings.json
 # 长期记忆数据库
 memory_db/
 
+# 短期记忆（对话历史）
+chat_history.db
+
 # Python 缓存
 __pycache__/
 *.pyc
