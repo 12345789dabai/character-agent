@@ -31,7 +31,10 @@ class MemoryStore:
             )
 
         self.client = chromadb.PersistentClient(path=db_path)
-        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '', character_name) or 'default'
+        import hashlib
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '', character_name)
+        if not safe_name:
+            safe_name = "char_" + hashlib.md5(character_name.encode()).hexdigest()[:8]
         self.collection_name = f"memories_{safe_name}"
 
         # 尝试打开已有集合，嵌入冲突时沿用旧的
@@ -50,6 +53,20 @@ class MemoryStore:
                 self.collection = self.client.get_collection(
                     self.collection_name, embedding_function=self.embedding_fn
                 )
+
+        # 迁移旧数据：从 memories_default 复制到新的命名集合
+        if self.collection_name != "memories_default":
+            try:
+                old = self.client.get_collection("memories_default")
+                if old.count() > 0 and self.collection.count() == 0:
+                    od = old.get()
+                    if od["ids"]:
+                        self.collection.add(
+                            ids=od["ids"], documents=od["documents"], metadatas=od["metadatas"]
+                        )
+                        self.client.delete_collection("memories_default")
+            except Exception:
+                pass
 
     def add_memory(self, summary: str, facts: list[str], topics: list[str], supersedes: str | None = None):
         """存入一条记忆，supersedes 表示覆盖了哪条旧记忆的 ID"""
