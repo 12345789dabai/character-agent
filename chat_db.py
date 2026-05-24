@@ -1,8 +1,6 @@
-"""短期记忆持久化 — SQLite 存储对话历史"""
+"""短期记忆持久化 — SQLite 存储对话历史（按角色隔离）"""
 
 import sqlite3
-from datetime import datetime
-from pathlib import Path
 
 
 class ChatDB:
@@ -13,50 +11,65 @@ class ChatDB:
             "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "  role TEXT NOT NULL,"
             "  content TEXT NOT NULL,"
+            "  character TEXT NOT NULL DEFAULT '',"
             "  created_at TEXT DEFAULT (datetime('now','localtime'))"
             ")"
         )
+        # 迁移：给旧数据加 character 列
+        try:
+            self.conn.execute("ALTER TABLE messages ADD COLUMN character TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass
         self.conn.commit()
+        self._current_char = ""
+
+    @property
+    def current_char(self) -> str:
+        return self._current_char
+
+    @current_char.setter
+    def current_char(self, name: str):
+        self._current_char = name
 
     def add(self, role: str, content: str):
         self.conn.execute(
-            "INSERT INTO messages (role, content) VALUES (?, ?)",
-            (role, content),
+            "INSERT INTO messages (role, content, character) VALUES (?, ?, ?)",
+            (role, content, self._current_char),
         )
         self.conn.commit()
 
     def get_all(self) -> list[dict]:
-        """按时间正序返回全部对话"""
         cur = self.conn.execute(
-            "SELECT role, content FROM messages ORDER BY id ASC"
+            "SELECT role, content FROM messages WHERE character=? OR character='' ORDER BY id ASC",
+            (self._current_char,),
         )
         return [{"role": r[0], "content": r[1]} for r in cur.fetchall()]
 
     def get_last_n(self, n: int) -> list[dict]:
-        """取最近 N 条（用于注入 prompt）"""
         cur = self.conn.execute(
-            "SELECT role, content FROM messages ORDER BY id DESC LIMIT ?", (n,)
+            "SELECT role, content FROM messages WHERE character=? OR character='' ORDER BY id DESC LIMIT ?",
+            (self._current_char, n),
         )
         rows = cur.fetchall()
         rows.reverse()
         return [{"role": r[0], "content": r[1]} for r in rows]
 
     def count(self) -> int:
-        cur = self.conn.execute("SELECT COUNT(*) FROM messages")
+        cur = self.conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE character=? OR character=''", (self._current_char,)
+        )
         return cur.fetchone()[0]
 
-    def turn_count(self) -> int:
-        """对话轮数（每条消息算半轮）"""
-        return self.count() // 2
-
     def last_message_time(self) -> str | None:
-        """最后一条消息的时间"""
         cur = self.conn.execute(
-            "SELECT created_at FROM messages ORDER BY id DESC LIMIT 1"
+            "SELECT created_at FROM messages WHERE character=? OR character='' ORDER BY id DESC LIMIT 1",
+            (self._current_char,),
         )
         row = cur.fetchone()
         return row[0] if row else None
 
     def clear(self):
-        self.conn.execute("DELETE FROM messages")
+        self.conn.execute(
+            "DELETE FROM messages WHERE character=? OR character=''", (self._current_char,)
+        )
         self.conn.commit()

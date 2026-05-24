@@ -357,10 +357,6 @@ function onCharSelect(sel) {
 }
 
 async function switchCharacter(name) {
-  if (!confirm('切换到「' + name + '」？当前对话将被清空。')) {
-    document.getElementById('char-select').value = getCharName();
-    return;
-  }
   try {
     const res = await fetch('/api/character/switch', {
       method: 'POST',
@@ -372,6 +368,7 @@ async function switchCharacter(name) {
     document.getElementById('messages').innerHTML = '';
     showMessage('system', '💬 ' + data.greeting);
     updateBadge(data.memory_count);
+    loadHistory();
     document.getElementById('sidebar').classList.add('hidden');
     document.getElementById('input').focus();
   } catch (e) {

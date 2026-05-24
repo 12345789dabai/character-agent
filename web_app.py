@@ -84,9 +84,10 @@ def startup():
     chars = Character.list_available()
     if chars:
         active_char = chars[0][1]
+        chat_db.current_char = active_char.name
         memory_store = MemoryStore(MEMORY_DIR, active_char.name, api_config=_settings)
         mode = "API" if memory_store._use_api_embedding else "本地"
-        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 嵌入:{mode}")
+        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 历史 {chat_db.count()} 条 | 嵌入:{mode}")
     else:
         print("[警告] characters/ 下没有角色卡")
 
@@ -215,19 +216,19 @@ def list_characters():
 
 @app.post("/api/character/switch")
 def switch_character(body: CharacterSwitchBody):
-    """切换角色，重置对话"""
-    global active_char, memory_store, chat_db
+    """切换角色（保留各自的对话历史）"""
+    global active_char, memory_store
     for path, char in Character.list_available():
         if char.name == body.name:
             active_char = char
+            chat_db.current_char = char.name
             memory_store = MemoryStore(MEMORY_DIR, char.name)
-            if chat_db:
-                chat_db.clear()
             return {
                 "ok": True,
                 "character": char.name,
                 "greeting": char.greeting,
                 "memory_count": memory_store.count(),
+                "history_count": chat_db.count(),
             }
     raise HTTPException(404, f"角色「{body.name}」不存在")
 
