@@ -120,6 +120,10 @@ class CreateCharacterBody(BaseModel):
     greeting: str = ""
 
 
+class GenerateCharacterBody(BaseModel):
+    description: str
+
+
 class UpdateMemoryBody(BaseModel):
     summary: str = ""
     facts: list[str] = []
@@ -252,6 +256,41 @@ def create_character(body: CreateCharacterBody):
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
     )
     return {"ok": True, "name": safe}
+
+
+@app.post("/api/character/generate")
+def generate_character(body: GenerateCharacterBody):
+    """AI 根据描述生成角色卡"""
+    if not body.description.strip():
+        raise HTTPException(400, "描述不能为空")
+    if not llm:
+        raise HTTPException(503, "请先在设置中配置 API")
+
+    prompt = (
+        "你是一个角色创作助手。根据用户描述，生成一个角色卡用于对话。\n\n"
+        "请严格按 JSON 格式输出，不要任何其他内容：\n"
+        '  "name": "角色名"\n'
+        '  "personality": "性格描述（20字左右）"\n'
+        '  "background": "背景故事（40字左右）"\n'
+        '  "speaking_style": "说话风格（10字左右）"\n'
+        '  "relationship_to_user": "和用户的关系（10字左右）"\n'
+        '  "greeting": "开场白（一句话）"\n\n'
+        f"用户描述：{body.description}\n"
+    )
+    try:
+        resp = llm.chat([{"role": "user", "content": prompt}])
+        text = resp.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0].strip()
+        data = json.loads(text)
+        required = ["name", "personality", "background", "speaking_style"]
+        if not all(k in data for k in required):
+            raise ValueError("缺少必要字段")
+        return data
+    except Exception as e:
+        raise HTTPException(500, f"AI 生成失败：{e}")
 
 
 @app.post("/api/chat")

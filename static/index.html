@@ -225,7 +225,20 @@ header {
 <!-- 创建角色弹窗 -->
 <div id="create-char-overlay" class="hidden">
   <div style="background:#fff;border-radius:14px;width:440px;max-width:90vw;padding:28px 32px;box-shadow:0 8px 40px rgba(0,0,0,.15);max-height:90vh;overflow-y:auto;">
-    <h2 style="font-size:18px;margin-bottom:20px;">创建新角色</h2>
+    <h2 style="font-size:18px;margin-bottom:16px;">创建新角色</h2>
+
+    <!-- AI 快速生成 -->
+    <div style="background:#f0f7ff;border-radius:8px;padding:12px 14px;margin-bottom:16px;">
+      <div style="font-size:13px;font-weight:500;color:#1a73e8;margin-bottom:6px;">AI 快速生成</div>
+      <div style="display:flex;gap:6px;">
+        <input id="cc-ai-prompt" placeholder="输入角色描述，如：林黛玉、诸葛亮、一个温柔的心理医生..." style="flex:1;padding:8px 10px;border:1px solid #cce0ff;border-radius:6px;font-size:13px;outline:none;">
+        <button onclick="aiGenerateChar()" id="btn-ai-gen" style="padding:8px 14px;border:none;border-radius:6px;background:#1a73e8;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;">AI 生成</button>
+      </div>
+      <div id="cc-ai-status" style="font-size:12px;color:#666;margin-top:4px;"></div>
+    </div>
+
+    <div style="font-size:12px;color:#ccc;text-align:center;margin-bottom:12px;">—— 或手动填写 ——</div>
+
     <div class="form-group">
       <label>角色名</label>
       <input id="cc-name" placeholder="如：张三">
@@ -373,6 +386,35 @@ function getCharName() {
 
 function closeCreateChar() {
   document.getElementById('create-char-overlay').classList.add('hidden');
+}
+
+async function aiGenerateChar() {
+  const desc = document.getElementById('cc-ai-prompt').value.trim();
+  if (!desc) { document.getElementById('cc-ai-status').textContent = '请输入角色描述'; return; }
+  const btn = document.getElementById('btn-ai-gen');
+  btn.disabled = true; btn.textContent = '生成中...';
+  document.getElementById('cc-ai-status').textContent = '';
+  try {
+    const res = await fetch('/api/character/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '生成失败');
+    document.getElementById('cc-name').value = data.name || '';
+    document.getElementById('cc-personality').value = data.personality || '';
+    document.getElementById('cc-background').value = data.background || '';
+    document.getElementById('cc-style').value = data.speaking_style || '';
+    document.getElementById('cc-relationship').value = data.relationship_to_user || '';
+    document.getElementById('cc-greeting').value = data.greeting || '';
+    document.getElementById('cc-ai-status').textContent = '✅ 已生成，可手动修改';
+    document.getElementById('cc-ai-status').style.color = '#34c759';
+  } catch (e) {
+    document.getElementById('cc-ai-status').textContent = '❌ ' + e.message;
+    document.getElementById('cc-ai-status').style.color = '#e33';
+  } finally {
+    btn.disabled = false; btn.textContent = 'AI 生成';
+  }
 }
 
 async function saveCharacter() {
