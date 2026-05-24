@@ -17,6 +17,6 @@ OPENAI_API_KEY = ""       # 或从环境变量读取
 OPENAI_MODEL = "gpt-4o-mini"
 
 # ---------- 记忆配置 ----------
-MEMORY_EXTRACT_INTERVAL = 3   # 每 N 轮对话提取一次长期记忆
 MAX_HISTORY_TURNS = 10        # 短期记忆保留最近 N 轮
 TOP_K_MEMORIES = 3            # 每次对话检索几条相关记忆
+SIMILARITY_THRESHOLD = 0.6    # 记忆检索距离阈值，大于此值的不注入 prompt

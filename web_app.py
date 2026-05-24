@@ -235,14 +235,16 @@ def create_character(body: CreateCharacterBody):
 
 @app.post("/api/chat")
 def chat(req: ChatRequest, background: BackgroundTasks):
-    """非流式版"""
+    """非流式版（查询重写 + 过滤检索）"""
     if not all([llm, active_char, memory_store, chat_db]):
         raise HTTPException(503, "系统未初始化")
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
 
-    memories = memory_store.search(user_input, n_results=TOP_K_MEMORIES)
+    # 查询重写 — 消除指代
+    rewritten = llm.rewrite_query(user_input, chat_db.get_last_n(4))
+    memories = memory_store.search(rewritten, n_results=TOP_K_MEMORIES, threshold=SIMILARITY_THRESHOLD)
     system_prompt = active_char.build_system_prompt(memories)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
@@ -266,14 +268,16 @@ def chat(req: ChatRequest, background: BackgroundTasks):
 
 @app.post("/api/chat/stream")
 def chat_stream(req: ChatRequest, background: BackgroundTasks):
-    """流式版"""
+    """流式版（查询重写 + 过滤检索）"""
     if not all([llm, active_char, memory_store, chat_db]):
         raise HTTPException(503, "系统未初始化")
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
 
-    memories = memory_store.search(user_input, n_results=TOP_K_MEMORIES)
+    # 查询重写 — 消除指代
+    rewritten = llm.rewrite_query(user_input, chat_db.get_last_n(4))
+    memories = memory_store.search(rewritten, n_results=TOP_K_MEMORIES, threshold=SIMILARITY_THRESHOLD)
     system_prompt = active_char.build_system_prompt(memories)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
@@ -375,7 +379,7 @@ def export_history():
 # 后台任务
 # ============================================================
 def _extract_memory_background():
-    """后台：取最后一轮对话 → 判断是否有价值 → 去重 → 存入"""
+    """后台：提取记忆 → 与旧记忆做冲突检测 → 存入"""
     recent = chat_db.get_last_n(2)
     if len(recent) < 2:
         return
@@ -386,11 +390,25 @@ def _extract_memory_background():
         lines.append(f"{role}: {msg['content']}")
     history_text = "\n".join(lines)
 
-    data = llm.extract_memory(history_text)
+    # 检索最相关的旧记忆做冲突检测
+    old = memory_store.search_with_ids(lines[-1], n_results=1)
+    old_summary = old[0]["summary"] if old else None
+    old_id = old[0]["id"] if old else None
+
+    data = llm.extract_memory(history_text, old_memory=old_summary)
     if not data or not data.get("worth") or not data.get("summary"):
         return
 
-    if memory_store.has_similar(data["summary"]):
+    relation = data.get("relation")
+    if relation == "duplicate":
+        return
+    if relation == "supersedes" and old_id:
+        memory_store.add_memory(
+            summary=data["summary"],
+            facts=data.get("facts", []),
+            topics=data.get("topics", []),
+            supersedes=old_id,
+        )
         return
 
     memory_store.add_memory(
