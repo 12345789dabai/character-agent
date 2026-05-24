@@ -24,6 +24,11 @@ header h1 { font-size: 17px; font-weight: 600; }
 .header-btn:hover { background: #f0f0f0; }
 #btn-memory { margin-left: auto; }
 #btn-settings { font-size: 18px; padding: 4px 10px; line-height: 1; }
+.char-select {
+  font-size: 17px; font-weight: 600; border: none; background: none;
+  cursor: pointer; outline: none; font-family: inherit; max-width: 200px;
+}
+.char-select:hover { opacity: .7; }
 
 #messages {
   flex: 1; overflow-y: auto; padding: 20px 20px; display: flex; flex-direction: column; gap: 14px;
@@ -172,7 +177,7 @@ header h1 { font-size: 17px; font-weight: 600; }
 <!-- 主聊天区 -->
 <div id="main">
   <header>
-    <h1 id="char-name">—</h1>
+    <select id="char-select" onchange="switchCharacter(this.value)" class="char-select"></select>
     <span id="memory-badge">0 条记忆</span>
     <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
     <button class="header-btn" onclick="exportChat()">导出</button>
@@ -192,7 +197,25 @@ header h1 { font-size: 17px; font-weight: 600; }
 <!-- 侧边栏 -->
 <div id="sidebar" class="hidden">
   <h2>长期记忆 <span id="sidebar-count" style="font-weight:normal;color:#999;font-size:13px;"></span></h2>
+  <div style="padding:8px 16px;display:flex;gap:6px;border-bottom:1px solid #e0e0e0;">
+    <input id="memory-search" placeholder="搜索记忆..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;" oninput="filterMemories(this.value)">
+    <button onclick="showAddMemory()" style="padding:6px 12px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">+添加</button>
+  </div>
   <div id="memory-list"><div class="empty-memories">点击「记忆」按钮查看</div></div>
+</div>
+
+<!-- 添加记忆弹窗 -->
+<div id="add-memory-overlay" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:300;display:flex;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:14px;width:400px;max-width:90vw;padding:24px 28px;box-shadow:0 8px 40px rgba(0,0,0,.15);">
+    <h3 style="font-size:16px;margin-bottom:16px;">+ 添加记忆</h3>
+    <textarea id="add-summary" rows="3" placeholder="记忆内容..." style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
+    <input id="add-facts" placeholder="关键事实（逗号分隔，可选）" style="width:100%;margin-top:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;">
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button onclick="saveMemory()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">保存</button>
+      <button onclick="closeAddMemory()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#f0f0f0;cursor:pointer;">取消</button>
+    </div>
+    <div id="add-status" style="margin-top:10px;font-size:13px;text-align:center;color:#34c759;"></div>
+  </div>
 </div>
 
 <script>
@@ -206,20 +229,16 @@ window.onload = async () => {
     const res = await fetch('/api/status');
     const data = await res.json();
 
-    if (data.character) {
-      document.getElementById('char-name').textContent = data.character;
-    }
+    await loadCharDropdown(data.character);
 
     if (data.configured) {
       configured = true;
       updateBadge(data.memory_count);
       showMessage('system', '💬 ' + data.greeting);
-      // 恢复上次的对话历史
       loadHistory();
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('input').focus();
     } else {
-      // 没配置过 — 强制打开设置
       document.getElementById('loading-screen').style.display = 'none';
       loadSettings();
       document.getElementById('settings-overlay').classList.remove('hidden');
@@ -231,6 +250,51 @@ window.onload = async () => {
       '<div class="err">无法连接服务器<br><small>' + e.message + '</small></div>';
   }
 };
+
+// ===== 角色切换 =====
+async function loadCharDropdown(currentName) {
+  try {
+    const res = await fetch('/api/characters');
+    const chars = await res.json();
+    const sel = document.getElementById('char-select');
+    sel.innerHTML = '';
+    chars.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.name; opt.textContent = c.name;
+      sel.appendChild(opt);
+    });
+    if (currentName) sel.value = currentName;
+  } catch (_) {}
+}
+
+async function switchCharacter(name) {
+  if (!confirm('切换到「' + name + '」？当前对话将被清空。')) {
+    document.getElementById('char-select').value = getCharName();
+    return;
+  }
+  try {
+    const res = await fetch('/api/character/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '切换失败');
+    document.getElementById('messages').innerHTML = '';
+    showMessage('system', '💬 ' + data.greeting);
+    updateBadge(data.memory_count);
+    sidebarLoaded = false;
+    document.getElementById('sidebar').classList.add('hidden');
+    document.getElementById('input').focus();
+  } catch (e) {
+    showMessage('system', '⚠️ ' + e.message);
+  }
+}
+
+function getCharName() {
+  const s = document.getElementById('char-select');
+  return s.options[s.selectedIndex]?.text || '助手';
+}
 
 // ===== 设置 =====
 const PRESETS = {
@@ -297,14 +361,12 @@ async function saveSettings() {
     statusEl.textContent = '✅ ' + data.message;
     statusEl.className = 'ok';
 
-    // 首次配置时解锁 UI
-    if (document.getElementById('char-name').textContent === '—') {
-      const s = await fetch('/api/status').then(r => r.json());
-      if (s.character) document.getElementById('char-name').textContent = s.character;
-      showMessage('system', '💬 ' + (s.greeting || '配置完成，开始聊天吧！'));
-      updateBadge(s.memory_count);
-      document.getElementById('input').focus();
-    }
+    // 首次配置时加载角色下拉框
+    const s = await fetch('/api/status').then(r => r.json());
+    if (s.character) await loadCharDropdown(s.character);
+    showMessage('system', '💬 ' + (s.greeting || '配置完成，开始聊天吧！'));
+    updateBadge(s.memory_count);
+    document.getElementById('input').focus();
   } catch (e) {
     const statusEl = document.getElementById('settings-status');
     statusEl.textContent = '❌ ' + e.message;
@@ -343,7 +405,7 @@ async function send() {
   // 创建空白角色消息气泡，后面逐字追加
   const charMsg = document.createElement('div');
   charMsg.className = 'msg char';
-  const charName = document.getElementById('char-name').textContent;
+  const charName = getCharName();
   charMsg.innerHTML = '<div class="name">' + esc(charName) + '</div>';
   document.getElementById('messages').appendChild(charMsg);
 
@@ -432,7 +494,7 @@ async function loadHistory() {
     const msgs = await res.json();
     for (const msg of msgs) {
       if (msg.role === 'user') showMessage('user', msg.content);
-      else if (msg.role === 'assistant') showMessage('char', msg.content, document.getElementById('char-name').textContent);
+      else if (msg.role === 'assistant') showMessage('char', msg.content, getCharName());
     }
   } catch (_) {}
 }
@@ -570,6 +632,52 @@ async function exportChat() {
   } catch (e) {
     showMessage('system', '⚠️ 导出失败');
   }
+}
+
+// ===== 记忆手动管理 =====
+let allMemories = [];
+function showAddMemory() {
+  document.getElementById('add-memory-overlay').classList.remove('hidden');
+  document.getElementById('add-summary').value = '';
+  document.getElementById('add-facts').value = '';
+  document.getElementById('add-status').textContent = '';
+}
+function closeAddMemory() {
+  document.getElementById('add-memory-overlay').classList.add('hidden');
+}
+async function saveMemory() {
+  const summary = document.getElementById('add-summary').value.trim();
+  if (!summary) return;
+  const facts = document.getElementById('add-facts').value.split(',').map(s => s.trim()).filter(Boolean);
+  const btn = document.querySelector('#add-memory-overlay button');
+  btn.disabled = true; btn.textContent = '保存中...';
+  try {
+    const res = await fetch('/api/memories', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ summary, facts }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail);
+    document.getElementById('add-status').textContent = '✅ 已保存';
+    document.getElementById('add-status').style.color = '#34c759';
+    updateBadge(data.memory_count);
+    setTimeout(closeAddMemory, 800);
+  } catch (e) {
+    document.getElementById('add-status').textContent = '❌ ' + e.message;
+    document.getElementById('add-status').style.color = '#e33';
+  } finally {
+    btn.disabled = false; btn.textContent = '保存';
+  }
+}
+
+function filterMemories(keyword) {
+  const list = document.getElementById('memory-list');
+  const cards = list.querySelectorAll('.memory-card');
+  const kw = keyword.toLowerCase().trim();
+  cards.forEach(card => {
+    const text = card.textContent.toLowerCase();
+    card.style.display = !kw || text.includes(kw) ? '' : 'none';
+  });
 }
 
 function esc(s) {

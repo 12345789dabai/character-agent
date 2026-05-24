@@ -107,6 +107,16 @@ class SettingsBody(BaseModel):
     base_url: str = ""
 
 
+class CharacterSwitchBody(BaseModel):
+    name: str
+
+
+class AddMemoryBody(BaseModel):
+    summary: str
+    facts: list[str] = []
+    topics: list[str] = []
+
+
 # ============================================================
 # API 路由
 # ============================================================
@@ -159,6 +169,25 @@ def list_characters():
         {"name": c.name, "greeting": c.greeting, "relationship": c.relationship}
         for _, c in Character.list_available()
     ]
+
+
+@app.post("/api/character/switch")
+def switch_character(body: CharacterSwitchBody):
+    """切换角色，重置对话"""
+    global active_char, memory_store, chat_db
+    for path, char in Character.list_available():
+        if char.name == body.name:
+            active_char = char
+            memory_store = MemoryStore(MEMORY_DIR, char.name)
+            if chat_db:
+                chat_db.clear()
+            return {
+                "ok": True,
+                "character": char.name,
+                "greeting": char.greeting,
+                "memory_count": memory_store.count(),
+            }
+    raise HTTPException(404, f"角色「{body.name}」不存在")
 
 
 @app.post("/api/chat")
@@ -238,6 +267,21 @@ def list_memories():
     if not memory_store:
         return []
     return memory_store.get_all(limit=100)
+
+
+@app.post("/api/memories")
+def add_memory(body: AddMemoryBody):
+    """手动添加一条记忆"""
+    if not memory_store:
+        raise HTTPException(503, "记忆系统未初始化")
+    if not body.summary.strip():
+        raise HTTPException(400, "记忆内容不能为空")
+    memory_store.add_memory(
+        summary=body.summary,
+        facts=body.facts,
+        topics=body.topics,
+    )
+    return {"ok": True, "memory_count": memory_store.count()}
 
 
 @app.delete("/api/memories/{memory_id}")
