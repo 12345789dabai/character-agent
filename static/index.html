@@ -175,6 +175,8 @@ header h1 { font-size: 17px; font-weight: 600; }
     <h1 id="char-name">—</h1>
     <span id="memory-badge">0 条记忆</span>
     <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
+    <button class="header-btn" onclick="exportChat()">导出</button>
+    <button class="header-btn" onclick="clearChat()">清空</button>
     <button class="header-btn" id="btn-settings" onclick="openSettings()">⚙</button>
   </header>
 
@@ -512,6 +514,32 @@ async function deleteMemory(id, cardEl) {
     cardEl.remove();
     updateBadge(document.querySelectorAll('.memory-card').length);
   } catch (_) { alert('删除失败'); }
+}
+
+async function clearChat() {
+  if (!confirm('清空当前对话？记忆不会被删除。')) return;
+  try {
+    await fetch('/api/history', { method: 'DELETE' });
+    document.getElementById('messages').innerHTML = '';
+    showMessage('system', '对话已清空');
+  } catch (e) {
+    showMessage('system', '⚠️ 清空失败');
+  }
+}
+
+async function exportChat() {
+  try {
+    const res = await fetch('/api/export');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'chat_history.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showMessage('system', '⚠️ 导出失败');
+  }
 }
 
 function esc(s) {

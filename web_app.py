@@ -248,6 +248,28 @@ def delete_memory(memory_id: str):
     return {"ok": True}
 
 
+@app.delete("/api/history")
+def clear_history():
+    """清空对话历史"""
+    if chat_db:
+        chat_db.clear()
+    return {"ok": True}
+
+
+@app.get("/api/export")
+def export_history():
+    """导出对话记录为 JSON 文件"""
+    if not chat_db:
+        return []
+    from fastapi.responses import JSONResponse
+    data = chat_db.get_all()
+    return JSONResponse(
+        content=data,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=chat_history.json"},
+    )
+
+
 # ============================================================
 # 后台任务
 # ============================================================
