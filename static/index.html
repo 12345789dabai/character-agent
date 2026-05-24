@@ -264,7 +264,16 @@ window.onload = async () => {
     if (data.configured) {
       configured = true;
       updateBadge(data.memory_count);
-      showMessage('system', '💬 ' + data.greeting);
+      // 久别重逢问候
+      let greeting = data.greeting;
+      if (data.last_message_time) {
+        const diff = Date.now() - new Date(data.last_message_time).getTime();
+        const hours = diff / 3600000;
+        if (hours >= 0.5 && hours < 4) greeting = '回来啦！' + greeting;
+        else if (hours >= 4 && hours < 24) greeting = '欢迎回来！' + greeting;
+        else if (hours >= 24) greeting = '好久不见！' + greeting;
+      }
+      showMessage('system', '💬 ' + greeting);
       loadHistory();
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('input').focus();
@@ -646,6 +655,12 @@ async function loadMemories() {
         const card = document.createElement('div');
         card.className = 'memory-card';
 
+        const editBtn = document.createElement('button');
+        editBtn.className = 'del';
+        editBtn.textContent = '✎';
+        editBtn.style.marginRight = '4px';
+        editBtn.onclick = () => startEditMemory(m.id, summaryEl, editBtn);
+
         const delBtn = document.createElement('button');
         delBtn.className = 'del';
         delBtn.textContent = '×';
@@ -655,13 +670,14 @@ async function loadMemories() {
         time.className = 'time';
         time.textContent = m.timestamp ? m.timestamp.slice(11, 16) : '';
 
-        const summary = document.createElement('div');
-        summary.className = 'summary';
-        summary.textContent = m.summary;
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'summary';
+        summaryEl.textContent = m.summary;
 
+        card.appendChild(editBtn);
         card.appendChild(delBtn);
         card.appendChild(time);
-        card.appendChild(summary);
+        card.appendChild(summaryEl);
 
         if (m.facts && m.facts.length) {
           const facts = document.createElement('div');
@@ -689,6 +705,59 @@ async function deleteMemory(id, cardEl) {
     cardEl.remove();
     updateBadge(document.querySelectorAll('.memory-card').length);
   } catch (_) { alert('删除失败'); }
+}
+
+function startEditMemory(id, summaryEl, btn) {
+  btn.dataset.mid = id;
+  const orig = summaryEl.textContent;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = orig;
+  input.className = 'summary';
+  input.style.cssText = 'width:100%;padding:4px 6px;border:1px solid #007aff;border-radius:4px;font-size:14px;outline:none;font-family:inherit;';
+  summaryEl.replaceWith(input);
+  btn.textContent = '✓';
+  btn.style.color = '#34c759';
+  btn.onclick = () => saveEditMemory(id, input, btn, orig);
+  input.focus();
+  input.select();
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') saveEditMemory(id, input, btn, orig);
+    if (e.key === 'Escape') cancelEdit(input, btn, orig);
+  };
+}
+
+async function saveEditMemory(id, input, btn, orig) {
+  const val = input.value.trim();
+  if (!val || val === orig) return cancelEdit(input, btn, orig);
+  try {
+    const res = await fetch('/api/memories/' + encodeURIComponent(id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ summary: val }),
+    });
+    if (!res.ok) throw new Error();
+    // 替换回显示模式
+    const summaryEl = document.createElement('div');
+    summaryEl.className = 'summary';
+    summaryEl.textContent = val;
+    input.replaceWith(summaryEl);
+    btn.textContent = '✎';
+    btn.style.color = '';
+    btn.onclick = () => startEditMemory(id, summaryEl, btn);
+  } catch (_) {
+    cancelEdit(input, btn, orig);
+  }
+}
+
+function cancelEdit(input, btn, orig) {
+  const summaryEl = document.createElement('div');
+  summaryEl.className = 'summary';
+  summaryEl.textContent = orig;
+  input.replaceWith(summaryEl);
+  btn.textContent = '✎';
+  btn.style.color = '';
+  const mid = btn.dataset.mid;
+  btn.onclick = () => { if (mid) startEditMemory(mid, summaryEl, btn); };
 }
 
 async function clearChat() {

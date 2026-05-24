@@ -120,6 +120,12 @@ class CreateCharacterBody(BaseModel):
     greeting: str = ""
 
 
+class UpdateMemoryBody(BaseModel):
+    summary: str = ""
+    facts: list[str] = []
+    topics: list[str] = []
+
+
 class AddMemoryBody(BaseModel):
     summary: str
     facts: list[str] = []
@@ -131,12 +137,14 @@ class AddMemoryBody(BaseModel):
 # ============================================================
 @app.get("/api/status")
 def get_status():
+    last_time = chat_db.last_message_time() if chat_db else None
     return {
         "configured": llm is not None,
         "character": active_char.name if active_char else None,
         "greeting": active_char.greeting if active_char else "",
         "memory_count": memory_store.count() if memory_store else 0,
         "history_count": chat_db.count() if chat_db else 0,
+        "last_message_time": last_time,
     }
 
 
@@ -317,6 +325,20 @@ def add_memory(body: AddMemoryBody):
         topics=body.topics,
     )
     return {"ok": True, "memory_count": memory_store.count()}
+
+
+@app.patch("/api/memories/{memory_id}")
+def update_memory(memory_id: str, body: UpdateMemoryBody):
+    """编辑一条记忆"""
+    if not memory_store:
+        raise HTTPException(503, "记忆系统未初始化")
+    memory_store.update_memory(
+        memory_id=memory_id,
+        summary=body.summary,
+        facts=body.facts,
+        topics=body.topics,
+    )
+    return {"ok": True}
 
 
 @app.delete("/api/memories/{memory_id}")

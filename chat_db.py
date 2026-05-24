@@ -49,6 +49,14 @@ class ChatDB:
         """对话轮数（每条消息算半轮）"""
         return self.count() // 2
 
+    def last_message_time(self) -> str | None:
+        """最后一条消息的时间"""
+        cur = self.conn.execute(
+            "SELECT created_at FROM messages ORDER BY id DESC LIMIT 1"
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
     def clear(self):
         self.conn.execute("DELETE FROM messages")
         self.conn.commit()

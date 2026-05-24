@@ -88,6 +88,17 @@ class MemoryStore:
             return results["distances"][0][0] < threshold
         return False
 
+    def update_memory(self, memory_id: str, summary: str, facts: list[str], topics: list[str]):
+        """更新一条记忆"""
+        search_text = summary + " " + " ".join(facts)
+        metadata = {
+            "timestamp": datetime.now().isoformat(),
+            "summary": summary,
+            "facts": json.dumps(facts, ensure_ascii=False),
+            "topics": json.dumps(topics, ensure_ascii=False),
+        }
+        self.collection.update(ids=[memory_id], documents=[search_text], metadatas=[metadata])
+
     def delete_memory(self, memory_id: str):
         """删除一条记忆"""
         self.collection.delete(ids=[memory_id])
