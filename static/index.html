@@ -108,6 +108,8 @@ header h1 { font-size: 17px; font-weight: 600; }
 #settings-overlay.hidden { display: none; }
 #add-memory-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; display: flex; align-items: center; justify-content: center; }
 #add-memory-overlay.hidden { display: none; }
+#create-char-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 250; display: flex; align-items: center; justify-content: center; }
+#create-char-overlay.hidden { display: none; }
 #settings-box {
   background: #fff; border-radius: 14px; width: 420px; max-width: 90vw;
   padding: 28px 32px; box-shadow: 0 8px 40px rgba(0,0,0,.15);
@@ -179,7 +181,7 @@ header h1 { font-size: 17px; font-weight: 600; }
 <!-- 主聊天区 -->
 <div id="main">
   <header>
-    <select id="char-select" onchange="switchCharacter(this.value)" class="char-select"></select>
+    <select id="char-select" onchange="onCharSelect(this)" class="char-select"></select>
     <span id="memory-badge">0 条记忆</span>
     <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
     <button class="header-btn" onclick="exportChat()">导出</button>
@@ -217,6 +219,42 @@ header h1 { font-size: 17px; font-weight: 600; }
       <button onclick="closeAddMemory()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#f0f0f0;cursor:pointer;">取消</button>
     </div>
     <div id="add-status" style="margin-top:10px;font-size:13px;text-align:center;color:#34c759;"></div>
+  </div>
+</div>
+
+<!-- 创建角色弹窗 -->
+<div id="create-char-overlay" class="hidden">
+  <div style="background:#fff;border-radius:14px;width:440px;max-width:90vw;padding:28px 32px;box-shadow:0 8px 40px rgba(0,0,0,.15);max-height:90vh;overflow-y:auto;">
+    <h2 style="font-size:18px;margin-bottom:20px;">创建新角色</h2>
+    <div class="form-group">
+      <label>角色名</label>
+      <input id="cc-name" placeholder="如：张三">
+    </div>
+    <div class="form-group">
+      <label>性格</label>
+      <input id="cc-personality" placeholder="如：温柔体贴、幽默风趣">
+    </div>
+    <div class="form-group">
+      <label>背景故事</label>
+      <textarea id="cc-background" rows="2" placeholder="角色的背景..." style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>说话风格</label>
+      <input id="cc-style" placeholder="如：口语化、喜欢用语气词">
+    </div>
+    <div class="form-group">
+      <label>和用户的关系</label>
+      <input id="cc-relationship" placeholder="如：多年好友、知心朋友">
+    </div>
+    <div class="form-group">
+      <label>开场白（可选）</label>
+      <input id="cc-greeting" placeholder="如：你好呀！今天想聊什么？">
+    </div>
+    <div id="cc-status" style="margin-top:8px;font-size:13px;text-align:center;"></div>
+    <div class="actions" style="margin-top:16px;">
+      <button onclick="saveCharacter()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">创建</button>
+      <button onclick="closeCreateChar()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#f0f0f0;cursor:pointer;">取消</button>
+    </div>
   </div>
 </div>
 
@@ -265,8 +303,24 @@ async function loadCharDropdown(currentName) {
       opt.value = c.name; opt.textContent = c.name;
       sel.appendChild(opt);
     });
+    // 分割线 + 创建新角色
+    const sep = document.createElement('option');
+    sep.disabled = true; sep.textContent = '────────';
+    sel.appendChild(sep);
+    const add = document.createElement('option');
+    add.value = '__new__'; add.textContent = '＋ 创建新角色';
+    sel.appendChild(add);
     if (currentName) sel.value = currentName;
   } catch (_) {}
+}
+
+function onCharSelect(sel) {
+  if (sel.value === '__new__') {
+    sel.value = getCharName();
+    document.getElementById('create-char-overlay').classList.remove('hidden');
+    return;
+  }
+  switchCharacter(sel.value);
 }
 
 async function switchCharacter(name) {
@@ -296,6 +350,45 @@ async function switchCharacter(name) {
 function getCharName() {
   const s = document.getElementById('char-select');
   return s.options[s.selectedIndex]?.text || '助手';
+}
+
+function closeCreateChar() {
+  document.getElementById('create-char-overlay').classList.add('hidden');
+}
+
+async function saveCharacter() {
+  const name = document.getElementById('cc-name').value.trim();
+  if (!name) { document.getElementById('cc-status').textContent = '请输入角色名'; return; }
+  const btn = document.querySelector('#create-char-overlay .actions button:nth-child(1)');
+  btn.disabled = true; btn.textContent = '创建中...';
+  document.getElementById('cc-status').textContent = '';
+  try {
+    const res = await fetch('/api/character/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        personality: document.getElementById('cc-personality').value.trim(),
+        background: document.getElementById('cc-background').value.trim(),
+        speaking_style: document.getElementById('cc-style').value.trim(),
+        relationship: document.getElementById('cc-relationship').value.trim(),
+        greeting: document.getElementById('cc-greeting').value.trim(),
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || '创建失败');
+    document.getElementById('cc-status').textContent = '✅ 创建成功！';
+    document.getElementById('cc-status').style.color = '#34c759';
+    setTimeout(() => {
+      closeCreateChar();
+      loadCharDropdown(name);
+      switchCharacter(name);
+    }, 800);
+  } catch (e) {
+    document.getElementById('cc-status').textContent = '❌ ' + e.message;
+    document.getElementById('cc-status').style.color = '#e33';
+  } finally {
+    btn.disabled = false; btn.textContent = '创建';
+  }
 }
 
 // ===== 设置 =====

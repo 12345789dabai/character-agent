@@ -111,6 +111,15 @@ class CharacterSwitchBody(BaseModel):
     name: str
 
 
+class CreateCharacterBody(BaseModel):
+    name: str
+    personality: str = ""
+    background: str = ""
+    speaking_style: str = ""
+    relationship: str = ""
+    greeting: str = ""
+
+
 class AddMemoryBody(BaseModel):
     summary: str
     facts: list[str] = []
@@ -188,6 +197,32 @@ def switch_character(body: CharacterSwitchBody):
                 "memory_count": memory_store.count(),
             }
     raise HTTPException(404, f"角色「{body.name}」不存在")
+
+
+@app.post("/api/character/create")
+def create_character(body: CreateCharacterBody):
+    """创建新角色卡"""
+    if not body.name.strip():
+        raise HTTPException(400, "角色名不能为空")
+    import re
+    safe = re.sub(r'[\\/:*?"<>|]', '', body.name.strip())
+    if not safe:
+        raise HTTPException(400, "角色名包含非法字符")
+    char_file = CHARACTERS_DIR / f"{safe}.json"
+    if char_file.exists():
+        raise HTTPException(400, f"角色「{safe}」已存在")
+    data = {
+        "name": safe,
+        "personality": body.personality,
+        "background": body.background,
+        "speaking_style": body.speaking_style,
+        "relationship_to_user": body.relationship,
+        "greeting": body.greeting or f"你好！我是{safe}，很高兴认识你～",
+    }
+    char_file.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    return {"ok": True, "name": safe}
 
 
 @app.post("/api/chat")
