@@ -21,7 +21,13 @@ class ChatDB:
         except sqlite3.OperationalError:
             pass
         self.conn.commit()
+        self._migrate_empty_characters()
         self._current_char = ""
+
+    def _migrate_empty_characters(self):
+        """迁移旧数据：把 character='' 的消息归到 'default'，后续查询不再兼容空值"""
+        self.conn.execute("UPDATE messages SET character='default' WHERE character=''")
+        self.conn.commit()
 
     @property
     def current_char(self) -> str:
@@ -40,14 +46,14 @@ class ChatDB:
 
     def get_all(self) -> list[dict]:
         cur = self.conn.execute(
-            "SELECT role, content FROM messages WHERE character=? OR character='' ORDER BY id ASC",
+            "SELECT role, content FROM messages WHERE character=? ORDER BY id ASC",
             (self._current_char,),
         )
         return [{"role": r[0], "content": r[1]} for r in cur.fetchall()]
 
     def get_last_n(self, n: int) -> list[dict]:
         cur = self.conn.execute(
-            "SELECT role, content FROM messages WHERE character=? OR character='' ORDER BY id DESC LIMIT ?",
+            "SELECT role, content FROM messages WHERE character=? ORDER BY id DESC LIMIT ?",
             (self._current_char, n),
         )
         rows = cur.fetchall()
@@ -56,13 +62,13 @@ class ChatDB:
 
     def count(self) -> int:
         cur = self.conn.execute(
-            "SELECT COUNT(*) FROM messages WHERE character=? OR character=''", (self._current_char,)
+            "SELECT COUNT(*) FROM messages WHERE character=?", (self._current_char,)
         )
         return cur.fetchone()[0]
 
     def last_message_time(self) -> str | None:
         cur = self.conn.execute(
-            "SELECT created_at FROM messages WHERE character=? OR character='' ORDER BY id DESC LIMIT 1",
+            "SELECT created_at FROM messages WHERE character=? ORDER BY id DESC LIMIT 1",
             (self._current_char,),
         )
         row = cur.fetchone()
@@ -70,6 +76,6 @@ class ChatDB:
 
     def clear(self):
         self.conn.execute(
-            "DELETE FROM messages WHERE character=? OR character=''", (self._current_char,)
+            "DELETE FROM messages WHERE character=?", (self._current_char,)
         )
         self.conn.commit()

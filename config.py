@@ -28,3 +28,4 @@ OPENAI_MODEL = "gpt-4o-mini"
 MAX_HISTORY_TURNS = 10        # 短期记忆保留最近 N 轮
 TOP_K_MEMORIES = 3            # 每次对话检索几条相关记忆
 SIMILARITY_THRESHOLD = 0.6    # 记忆检索距离阈值，大于此值的不注入 prompt
+MAX_MEMORIES = 500            # 每个角色长期记忆上限，超出自动淘汰最旧的

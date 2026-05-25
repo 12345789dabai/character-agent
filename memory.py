@@ -3,6 +3,7 @@ import re
 from datetime import datetime
 import chromadb
 from chromadb.utils import embedding_functions
+from config import MAX_MEMORIES
 
 
 class MemoryStore:
@@ -87,6 +88,25 @@ class MemoryStore:
             )
         search_text = summary + " " + " ".join(facts)
         self.collection.add(documents=[search_text], metadatas=[metadata], ids=[memory_id])
+        self._prune_if_needed()
+
+    def _prune_if_needed(self):
+        """超过上限时淘汰最旧的记忆"""
+        count = self.collection.count()
+        if count <= MAX_MEMORIES:
+            return
+
+        results = self.collection.get()
+        if not results.get("metadatas"):
+            return
+
+        pairs = list(zip(results["ids"], results["metadatas"]))
+        pairs.sort(key=lambda x: x[1].get("timestamp", ""))
+
+        excess = count - MAX_MEMORIES
+        to_delete = [mid for mid, _ in pairs[:excess]]
+        if to_delete:
+            self.collection.delete(ids=to_delete)
 
     def search(self, query: str, n_results: int = 3, threshold: float | None = None) -> list[dict]:
         """语义搜索，threshold 过滤低分（距离越小越相似）"""
@@ -115,16 +135,20 @@ class MemoryStore:
                     break
         return memories
 
-    def search_with_ids(self, query: str, n_results: int = 3) -> list[dict]:
+    def search_with_ids(self, query: str, n_results: int = 3, threshold: float | None = None) -> list[dict]:
         """搜索并返回 ID（供后台任务使用）"""
         if self.collection.count() == 0:
             return []
 
-        results = self.collection.query(query_texts=[query], n_results=n_results)
+        include = ["metadatas", "distances"]
+        results = self.collection.query(query_texts=[query], n_results=n_results, include=include)
         memories = []
         if results["documents"] and results["documents"][0]:
             for i, mem_id in enumerate(results["ids"][0]):
                 meta = results["metadatas"][0][i]
+                dist = results["distances"][0][i] if results.get("distances") else 0
+                if threshold is not None and dist > threshold:
+                    continue
                 memories.append({
                     "id": mem_id,
                     "timestamp": meta["timestamp"],
@@ -150,16 +174,6 @@ class MemoryStore:
                     "superseded": bool(meta.get("superseded_by")),
                 })
         return memories
-
-    def has_similar(self, text: str, threshold: float = 0.4) -> bool:
-        if self.collection.count() == 0:
-            return False
-        results = self.collection.query(
-            query_texts=[text], n_results=1, include=["distances"]
-        )
-        if results.get("distances") and results["distances"][0]:
-            return results["distances"][0][0] < threshold
-        return False
 
     def update_memory(self, memory_id: str, summary: str, facts: list[str], topics: list[str]):
         search_text = summary + " " + " ".join(facts)

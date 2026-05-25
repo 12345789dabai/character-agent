@@ -42,6 +42,7 @@ header {
 .msg.system { align-self: center; background: none; color: #999; font-size: 12px; padding: 4px 8px; }
 .msg .name { font-size: 12px; font-weight: 600; margin-bottom: 3px; color: #666; }
 .msg.user .name { color: rgba(255,255,255,.75); }
+.msg .typing-hint { color: #999; font-size: 14px; }
 
 
 #input-area {
@@ -183,6 +184,8 @@ header {
 <div id="main">
   <header>
     <select id="char-select" onchange="onCharSelect(this)" class="char-select"></select>
+    <button class="header-btn" id="btn-edit-char" onclick="editCharacter()" title="编辑当前角色" style="font-size:13px;padding:4px 8px;">✎</button>
+    <button class="header-btn" id="btn-del-char" onclick="deleteCharacter()" title="删除当前角色" style="font-size:13px;padding:4px 8px;">✕</button>
     <span id="memory-badge">0 条记忆</span>
     <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
     <button class="header-btn" onclick="exportChat()">导出</button>
@@ -225,7 +228,7 @@ header {
 <!-- 创建角色弹窗 -->
 <div id="create-char-overlay" class="hidden">
   <div style="background:#fff;border-radius:14px;width:440px;max-width:90vw;padding:28px 32px;box-shadow:0 8px 40px rgba(0,0,0,.15);max-height:90vh;overflow-y:auto;">
-    <h2 style="font-size:18px;margin-bottom:16px;">创建新角色</h2>
+    <h2 id="cc-title" style="font-size:18px;margin-bottom:16px;">创建新角色</h2>
 
     <!-- AI 快速生成 -->
     <div style="background:#f0f7ff;border-radius:8px;padding:12px 14px;margin-bottom:16px;">
@@ -265,7 +268,7 @@ header {
     </div>
     <div id="cc-status" style="margin-top:8px;font-size:13px;text-align:center;"></div>
     <div class="actions" style="margin-top:16px;">
-      <button onclick="saveCharacter()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">创建</button>
+      <button id="cc-save-btn" onclick="saveCharacter()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">创建</button>
       <button onclick="closeCreateChar()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#f0f0f0;cursor:pointer;">取消</button>
     </div>
   </div>
@@ -275,6 +278,16 @@ header {
 // ===== 状态 =====
 let isLoading = false;
 let configured = false;
+let lastCharName = '';
+let isEditingChar = false;  // 创建弹窗是否处于编辑模式
+
+// 启动超时提示（首次需下载模型 ~400MB）
+setTimeout(() => {
+  const t = document.getElementById('loading-text');
+  if (t && t.textContent === '正在连接服务器...') {
+    t.textContent = '首次启动可能较慢（下载模型）...';
+  }
+}, 8000);
 
 // ===== 启动 =====
 window.onload = async () => {
@@ -343,16 +356,20 @@ async function loadCharDropdown(currentName) {
     const add = document.createElement('option');
     add.value = '__new__'; add.textContent = '＋ 创建新角色';
     sel.appendChild(add);
-    if (currentName) sel.value = currentName;
+    if (currentName) {
+      sel.value = currentName;
+      lastCharName = currentName;
+    }
   } catch (_) {}
 }
 
 function onCharSelect(sel) {
   if (sel.value === '__new__') {
-    sel.value = getCharName();
+    sel.value = lastCharName || '';
     document.getElementById('create-char-overlay').classList.remove('hidden');
     return;
   }
+  lastCharName = sel.value;
   switchCharacter(sel.value);
 }
 
@@ -365,6 +382,7 @@ async function switchCharacter(name) {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || '切换失败');
+    lastCharName = data.character;
     document.getElementById('messages').innerHTML = '';
     showMessage('system', '💬 ' + data.greeting);
     updateBadge(data.memory_count);
@@ -383,6 +401,57 @@ function getCharName() {
 
 function closeCreateChar() {
   document.getElementById('create-char-overlay').classList.add('hidden');
+  isEditingChar = false;
+}
+
+async function editCharacter() {
+  const name = document.getElementById('char-select').value;
+  if (!name || name === '__new__') return;
+  try {
+    const res = await fetch('/api/character/' + encodeURIComponent(name));
+    if (!res.ok) throw new Error('获取角色信息失败');
+    const data = await res.json();
+    document.getElementById('cc-name').value = data.name || '';
+    document.getElementById('cc-personality').value = data.personality || '';
+    document.getElementById('cc-background').value = data.background || '';
+    document.getElementById('cc-style').value = data.speaking_style || '';
+    document.getElementById('cc-relationship').value = data.relationship || '';
+    document.getElementById('cc-greeting').value = data.greeting || '';
+    document.getElementById('cc-title').textContent = '编辑角色';
+    document.getElementById('cc-save-btn').textContent = '保存';
+    document.getElementById('cc-ai-status').textContent = '';
+    document.getElementById('cc-status').textContent = '';
+    isEditingChar = true;
+    document.getElementById('create-char-overlay').classList.remove('hidden');
+  } catch (e) {
+    showMessage('system', '⚠️ ' + e.message);
+  }
+}
+
+async function deleteCharacter() {
+  const name = document.getElementById('char-select').value;
+  if (!name || name === '__new__') return;
+  if (!confirm('确认删除角色「' + name + '」？所有关联的记忆和历史也会丢失。')) return;
+  try {
+    const res = await fetch('/api/character/' + encodeURIComponent(name), { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || '删除失败');
+    }
+    // 跳转到第一个可用角色
+    const r = await fetch('/api/characters');
+    const chars = await r.json();
+    const next = chars.find(c => c.name !== name);
+    await loadCharDropdown(next ? next.name : null);
+    if (next) {
+      await switchCharacter(next.name);
+    } else {
+      document.getElementById('messages').innerHTML = '';
+      showMessage('system', '没有可用的角色，请创建新角色');
+    }
+  } catch (e) {
+    showMessage('system', '⚠️ ' + e.message);
+  }
 }
 
 async function aiGenerateChar() {
@@ -417,35 +486,42 @@ async function aiGenerateChar() {
 async function saveCharacter() {
   const name = document.getElementById('cc-name').value.trim();
   if (!name) { document.getElementById('cc-status').textContent = '请输入角色名'; return; }
-  const btn = document.querySelector('#create-char-overlay .actions button:nth-child(1)');
-  btn.disabled = true; btn.textContent = '创建中...';
+  const btn = document.getElementById('cc-save-btn');
+  btn.disabled = true;
+  btn.textContent = isEditingChar ? '保存中...' : '创建中...';
   document.getElementById('cc-status').textContent = '';
+
+  const body = {
+    name: isEditingChar ? lastCharName : name,
+    new_name: name,
+    personality: document.getElementById('cc-personality').value.trim(),
+    background: document.getElementById('cc-background').value.trim(),
+    speaking_style: document.getElementById('cc-style').value.trim(),
+    relationship: document.getElementById('cc-relationship').value.trim(),
+    greeting: document.getElementById('cc-greeting').value.trim(),
+  };
+
   try {
-    const res = await fetch('/api/character/create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        personality: document.getElementById('cc-personality').value.trim(),
-        background: document.getElementById('cc-background').value.trim(),
-        speaking_style: document.getElementById('cc-style').value.trim(),
-        relationship: document.getElementById('cc-relationship').value.trim(),
-        greeting: document.getElementById('cc-greeting').value.trim(),
-      }),
+    const res = await fetch(isEditingChar ? '/api/character/update' : '/api/character/create', {
+      method: isEditingChar ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || '创建失败');
-    document.getElementById('cc-status').textContent = '✅ 创建成功！';
+    if (!res.ok) throw new Error(data.detail || (isEditingChar ? '保存失败' : '创建失败'));
+    document.getElementById('cc-status').textContent = isEditingChar ? '✅ 已保存！' : '✅ 创建成功！';
     document.getElementById('cc-status').style.color = '#34c759';
-    setTimeout(() => {
+    setTimeout(async () => {
       closeCreateChar();
-      loadCharDropdown(name);
-      switchCharacter(name);
+      await loadCharDropdown(data.name);
+      switchCharacter(data.name);
     }, 800);
   } catch (e) {
     document.getElementById('cc-status').textContent = '❌ ' + e.message;
     document.getElementById('cc-status').style.color = '#e33';
   } finally {
-    btn.disabled = false; btn.textContent = '创建';
+    btn.disabled = false;
+    btn.textContent = isEditingChar ? '保存' : '创建';
   }
 }
 
@@ -600,36 +676,82 @@ async function send() {
   document.getElementById('send-btn').disabled = true;
   scrollBottom();
 
-  // 创建空白角色消息气泡，后面逐字追加
+  // 创建角色消息气泡 + "正在输入"占位
   const charMsg = document.createElement('div');
   charMsg.className = 'msg char';
   const charName = getCharName();
+  const hintSpan = document.createElement('span');
+  hintSpan.className = 'typing-hint';
+  hintSpan.textContent = '正在输入...';
   charMsg.innerHTML = '<div class="name">' + esc(charName) + '</div>';
+  charMsg.appendChild(hintSpan);
   document.getElementById('messages').appendChild(charMsg);
 
-  try {
-    const res = await fetch('/api/chat/stream', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg }),
-    });
-    if (!res.ok) {
+  let started = false;
+
+  // ===== 发送请求（网络错误自动重试一次） =====
+  let res;
+  let lastError;
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    try {
+      res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      lastError = null;
+      break; // 请求成功，退出重试循环
+    } catch (e) {
+      lastError = e;
+      if (attempt === 0 && e instanceof TypeError) {
+        hintSpan.textContent = '重连中...';
+        await new Promise(r => setTimeout(r, 1000));
+        continue; // 仅首次网络失败时重试
+      }
+      break;
+    }
+  }
+
+  // 请求最终还是失败了
+  if (lastError) {
+    if (charMsg.parentNode) charMsg.remove();
+    showMessage('system', '⚠️ ' + lastError.message);
+    isLoading = false;
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('input').focus();
+    scrollBottom();
+    return;
+  }
+
+  // 服务器返回错误
+  if (!res.ok) {
+    try {
       const err = await res.json();
       throw new Error(err.detail || res.statusText);
+    } catch (e) {
+      if (charMsg.parentNode) charMsg.remove();
+      showMessage('system', '⚠️ ' + e.message);
+      isLoading = false;
+      document.getElementById('send-btn').disabled = false;
+      document.getElementById('input').focus();
+      scrollBottom();
+      return;
     }
+  }
 
+  // ===== 流式读取 =====
+  let fullBuffer = '';
+  try {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      fullBuffer += decoder.decode(value, { stream: true });
 
-      // 按行解析 SSE
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || ''; // 不完整的行留在 buffer
+      const lines = fullBuffer.split('\n');
+      fullBuffer = lines.pop() || '';
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
@@ -637,7 +759,10 @@ async function send() {
         try { data = JSON.parse(line.slice(6)); } catch (_) { continue; }
 
         if (data.text) {
-          // 追加文本到气泡
+          if (!started) {
+            started = true;
+            hintSpan.remove();
+          }
           const textEl = charMsg.querySelector('.text') || (() => {
             const t = document.createElement('span');
             t.className = 'text';
@@ -658,9 +783,34 @@ async function send() {
         }
       }
     }
+
+    // 刷新 buffer 残留
+    if (fullBuffer.trim()) {
+      const line = fullBuffer.trim();
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.text) {
+            if (!started) {
+              started = true;
+              hintSpan.remove();
+            }
+            const textEl = charMsg.querySelector('.text') || (() => {
+              const t = document.createElement('span');
+              t.className = 'text';
+              charMsg.appendChild(t);
+              return t;
+            })();
+            textEl.textContent += data.text;
+            scrollBottom();
+          }
+          if (data.done) updateBadge(data.memory_count);
+        } catch (_) {}
+      }
+    }
   } catch (e) {
     if (charMsg.parentNode) charMsg.remove();
-    showMessage('system', '⚠️ ' + e.message);
+    showMessage('system', '⚠️ 连接中断: ' + e.message);
   } finally {
     isLoading = false;
     document.getElementById('send-btn').disabled = false;
@@ -690,6 +840,10 @@ async function loadHistory() {
   try {
     const res = await fetch('/api/history');
     const msgs = await res.json();
+    if (msgs.length === 0) {
+      showMessage('system', '💡 开始聊天吧，重要信息会自动保存为长期记忆');
+      return;
+    }
     for (const msg of msgs) {
       if (msg.role === 'user') showMessage('user', msg.content);
       else if (msg.role === 'assistant') showMessage('char', msg.content, getCharName());

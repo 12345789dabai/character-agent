@@ -2,7 +2,8 @@
 Web 服务器 — 后台任务 + 聊天界面 API
 """
 import json
-import os
+import re
+import threading
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
@@ -26,6 +27,9 @@ _settings: dict | None = None
 
 SETTINGS_FILE = BASE_DIR / "user_settings.json"
 HISTORY_DB = str(BASE_DIR / "chat_history.db")
+
+# 后台任务锁：同一时刻只有一个记忆提取任务在执行
+_memory_lock = threading.Lock()
 
 app = FastAPI(title="永久角色对话 Agent")
 
@@ -55,9 +59,6 @@ def apply_settings(s: dict):
     api_key = s.get("api_key", "")
     model = s.get("model", "gpt-4o-mini")
     base_url = s.get("base_url", "")
-
-    if provider == "openai" and api_key:
-        os.environ["OPENAI_API_KEY"] = api_key
 
     llm = LLM(provider=provider, model=model, base_url=base_url, api_key=api_key)
 
@@ -123,6 +124,16 @@ class CreateCharacterBody(BaseModel):
 
 class GenerateCharacterBody(BaseModel):
     description: str
+
+
+class UpdateCharacterBody(BaseModel):
+    name: str
+    new_name: str = ""
+    personality: str = ""
+    background: str = ""
+    speaking_style: str = ""
+    relationship: str = ""
+    greeting: str = ""
 
 
 class UpdateMemoryBody(BaseModel):
@@ -222,7 +233,7 @@ def switch_character(body: CharacterSwitchBody):
         if char.name == body.name:
             active_char = char
             chat_db.current_char = char.name
-            memory_store = MemoryStore(MEMORY_DIR, char.name)
+            memory_store = MemoryStore(MEMORY_DIR, char.name, api_config=_settings)
             return {
                 "ok": True,
                 "character": char.name,
@@ -259,25 +270,59 @@ def create_character(body: CreateCharacterBody):
     return {"ok": True, "name": safe}
 
 
+def _search_web(query: str, max_results: int = 5) -> str:
+    """搜索网页并返回摘要文本，失败时返回空字符串"""
+    try:
+        from duckduckgo_search import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+        if not results:
+            return ""
+        parts = []
+        for r in results:
+            title = r.get("title", "")
+            body = r.get("body", "")
+            if title or body:
+                parts.append(f"{title}：{body}" if title else body)
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 @app.post("/api/character/generate")
 def generate_character(body: GenerateCharacterBody):
-    """AI 根据描述生成角色卡"""
+    """AI 根据描述生成角色卡（先搜索，再生成，小众角色也不怕）"""
     if not body.description.strip():
         raise HTTPException(400, "描述不能为空")
     if not llm:
         raise HTTPException(503, "请先在设置中配置 API")
 
-    prompt = (
-        "你是一个角色创作助手。根据用户描述，生成一个角色卡用于对话。\n\n"
-        "请严格按 JSON 格式输出，不要任何其他内容：\n"
+    # 第一步：搜索互联网获取角色信息
+    search_text = _search_web(body.description)
+
+    # 第二步：组装 prompt
+    prompt_parts = [
+        "你是一个角色创作专家。根据用户的描述，生成一个立体的角色卡，用于沉浸式对话。\n",
+    ]
+    if search_text:
+        prompt_parts.append(
+            f"以下是搜索到的参考资料（请基于这些信息，不要瞎编）：\n{search_text}\n\n"
+        )
+    prompt_parts += [
+        "要求：\n"
+        "1. 每个字段尽量丰富有细节（性格60字+，背景100字+，风格30字+）\n"
+        "2. 如果参考资料不足，根据名字和描述合理推断，不要编造具体虚假信息\n"
+        "3. 只输出 JSON，不要任何其他内容\n\n"
+        "字段：\n"
         '  "name": "角色名"\n'
-        '  "personality": "性格描述（20字左右）"\n'
-        '  "background": "背景故事（40字左右）"\n'
-        '  "speaking_style": "说话风格（10字左右）"\n'
-        '  "relationship_to_user": "和用户的关系（10字左右）"\n'
-        '  "greeting": "开场白（一句话）"\n\n'
+        '  "personality": "有层次的性格描述"\n'
+        '  "background": "有细节的背景故事"\n'
+        '  "speaking_style": "说话语气、用词习惯、口头禅等"\n'
+        '  "relationship_to_user": "和用户的关系"\n'
+        '  "greeting": "符合角色身份的开场白"\n\n'
         f"用户描述：{body.description}\n"
-    )
+    ]
+    prompt = "".join(prompt_parts)
     try:
         resp = llm.chat([{"role": "user", "content": prompt}])
         text = resp.strip()
@@ -285,13 +330,94 @@ def generate_character(body: GenerateCharacterBody):
             text = text.split("```json")[1].split("```")[0].strip()
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
-        data = json.loads(text)
+
+        # 三级宽容解析：标准 JSON -> 修复逗号 -> 正则兜底
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            fixed = re.sub(r',\s*}', '}', text)
+            fixed = re.sub(r',\s*]', ']', fixed)
+            try:
+                data = json.loads(fixed)
+            except json.JSONDecodeError:
+                # 终极兜底：正则直接提取 "key": "value" 对
+                data = {}
+                pairs = re.findall(r'"(\w+)"\s*:\s*"([^"]*)"', text)
+                for key, value in pairs:
+                    data[key] = value
+
         required = ["name", "personality", "background", "speaking_style"]
         if not all(k in data for k in required):
             raise ValueError("缺少必要字段")
         return data
     except Exception as e:
-        raise HTTPException(500, f"AI 生成失败：{e}")
+        raise HTTPException(500, f"AI 生成失败，请重试。错误：{e}")
+
+
+@app.get("/api/character/{name}")
+def get_character(name: str):
+    """获取单个角色完整信息（用于编辑）"""
+    for path, char in Character.list_available():
+        if char.name == name:
+            return {
+                "name": char.name,
+                "personality": char.personality,
+                "background": char.background,
+                "speaking_style": char.speaking_style,
+                "relationship": char.relationship,
+                "greeting": char.greeting,
+            }
+    raise HTTPException(404, f"角色「{name}」不存在")
+
+
+@app.put("/api/character/update")
+def update_character(body: UpdateCharacterBody):
+    """更新角色卡（支持改名）"""
+    if not body.name.strip():
+        raise HTTPException(400, "角色名不能为空")
+    safe = re.sub(r'[\\/:*?"<>|]', '', body.name.strip())
+    char_file = CHARACTERS_DIR / f"{safe}.json"
+    if not char_file.exists():
+        raise HTTPException(404, f"角色「{body.name}」不存在")
+
+    final_name = body.new_name.strip() or body.name.strip()
+    final_safe = re.sub(r'[\\/:*?"<>|]', '', final_name)
+    if not final_safe:
+        raise HTTPException(400, "角色名包含非法字符")
+
+    data = {
+        "name": final_safe,
+        "personality": body.personality,
+        "background": body.background,
+        "speaking_style": body.speaking_style,
+        "relationship_to_user": body.relationship,
+        "greeting": body.greeting or f"你好！我是{final_safe}，很高兴认识你～",
+    }
+
+    # 如果改了名，删旧文件建新文件
+    if final_safe != safe:
+        char_file.unlink()
+        new_file = CHARACTERS_DIR / f"{final_safe}.json"
+        if new_file.exists():
+            raise HTTPException(400, f"角色「{final_safe}」已存在")
+        new_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    else:
+        char_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return {"ok": True, "name": final_safe}
+
+
+@app.delete("/api/character/{name}")
+def delete_character(name: str):
+    """删除角色卡"""
+    safe = re.sub(r'[\\/:*?"<>|]', '', name)
+    if not safe:
+        raise HTTPException(400, "角色名无效")
+    char_file = CHARACTERS_DIR / f"{safe}.json"
+    if not char_file.exists():
+        raise HTTPException(404, f"角色「{name}」不存在")
+    char_file.unlink()
+    return {"ok": True, "message": f"角色「{name}」已删除"}
 
 
 @app.post("/api/chat")
@@ -316,9 +442,14 @@ def chat(req: ChatRequest, background: BackgroundTasks):
     except LLMError as e:
         raise HTTPException(500, str(e))
 
+    # 构建上下文给后台任务（当前轮之前的对话）
+    ctx = chat_db.get_last_n(4)
+    ctx_lines = [f"{'用户' if m['role']=='user' else '角色'}: {m['content']}" for m in ctx]
+    context_text = "\n".join(ctx_lines)
+
     chat_db.add("user", user_input)
     chat_db.add("assistant", response)
-    background.add_task(_extract_memory_background)
+    background.add_task(_extract_memory_background, user_input, response, active_char.name, context_text)
 
     return {
         "reply": response,
@@ -344,6 +475,11 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
     messages.append({"role": "user", "content": user_input})
 
+    # 捕获上下文给后台任务（闭包内访问）
+    ctx = chat_db.get_last_n(4)
+    ctx_lines = [f"{'用户' if m['role']=='user' else '角色'}: {m['content']}" for m in ctx]
+    context_text = "\n".join(ctx_lines)
+
     def event_stream():
         full_response = ""
         try:
@@ -356,7 +492,7 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
 
         chat_db.add("user", user_input)
         chat_db.add("assistant", full_response)
-        background.add_task(_extract_memory_background)
+        background.add_task(_extract_memory_background, user_input, full_response, active_char.name, context_text)
 
         yield f"data: {json.dumps({'done': True, 'memory_count': memory_store.count(), 'character_name': active_char.name})}\n\n"
 
@@ -439,44 +575,47 @@ def export_history():
 # ============================================================
 # 后台任务
 # ============================================================
-def _extract_memory_background():
-    """后台：提取记忆 → 与旧记忆做冲突检测 → 存入"""
-    recent = chat_db.get_last_n(2)
-    if len(recent) < 2:
+def _extract_memory_background(user_msg: str, assistant_msg: str, character_name: str, context_text: str = ""):
+    """后台：提取记忆 → 与旧记忆做冲突检测 → 存入（绑定角色，不依赖全局变量）"""
+    # 前一个任务还在跑则跳过本轮，避免重复记忆和资源竞争
+    if not _memory_lock.acquire(blocking=False):
         return
 
-    lines = []
-    for msg in recent:
-        role = "用户" if msg["role"] == "user" else "角色"
-        lines.append(f"{role}: {msg['content']}")
-    history_text = "\n".join(lines)
+    try:
+        if context_text:
+            history_text = f"{context_text}\n用户: {user_msg}\n角色: {assistant_msg}"
+        else:
+            history_text = f"用户: {user_msg}\n角色: {assistant_msg}"
 
-    # 检索最相关的旧记忆做冲突检测
-    old = memory_store.search_with_ids(lines[-1], n_results=1)
-    old_summary = old[0]["summary"] if old else None
-    old_id = old[0]["id"] if old else None
+        mem_store = MemoryStore(MEMORY_DIR, character_name, api_config=_settings)
 
-    data = llm.extract_memory(history_text, old_memory=old_summary)
-    if not data or not data.get("worth") or not data.get("summary"):
-        return
+        old = mem_store.search_with_ids(assistant_msg, n_results=1, threshold=SIMILARITY_THRESHOLD)
+        old_summary = old[0]["summary"] if old else None
+        old_id = old[0]["id"] if old else None
 
-    relation = data.get("relation")
-    if relation == "duplicate":
-        return
-    if relation == "supersedes" and old_id:
-        memory_store.add_memory(
+        data = llm.extract_memory(history_text, old_memory=old_summary)
+        if not data or not data.get("worth") or not data.get("summary"):
+            return
+
+        relation = data.get("relation")
+        if relation == "duplicate":
+            return
+        if relation in ("supersedes", "contradicts") and old_id:
+            mem_store.add_memory(
+                summary=data["summary"],
+                facts=data.get("facts", []),
+                topics=data.get("topics", []),
+                supersedes=old_id,
+            )
+            return
+
+        mem_store.add_memory(
             summary=data["summary"],
             facts=data.get("facts", []),
             topics=data.get("topics", []),
-            supersedes=old_id,
         )
-        return
-
-    memory_store.add_memory(
-        summary=data["summary"],
-        facts=data.get("facts", []),
-        topics=data.get("topics", []),
-    )
+    finally:
+        _memory_lock.release()
 
 
 # ============================================================
