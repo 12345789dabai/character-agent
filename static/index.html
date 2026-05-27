@@ -93,40 +93,46 @@ header {
 #loading-screen .err { color: #e33; font-size: 14px; }
 
 /* ===== 设置弹窗 ===== */
-#settings-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 200;
-  display: flex; align-items: center; justify-content: center;
-}
-#settings-overlay.hidden { display: none; }
 #add-memory-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; display: flex; align-items: center; justify-content: center; }
 #add-memory-overlay.hidden { display: none; }
 #create-char-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 250; display: flex; align-items: center; justify-content: center; }
 #create-char-overlay.hidden { display: none; }
-#settings-box {
-  background: #fff; border-radius: 14px; width: 420px; max-width: 90vw;
-  padding: 28px 32px; box-shadow: 0 8px 40px rgba(0,0,0,.15);
+
+/* ===== 密码登录页 ===== */
+#login-overlay {
+  position: fixed; inset: 0; background: #fff; z-index: 500;
+  display: flex; align-items: center; justify-content: center;
 }
-#settings-box h2 { font-size: 18px; margin-bottom: 20px; }
-.form-group { margin-bottom: 16px; }
-.form-group label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 5px; }
-.form-group input, .form-group select {
-  width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 8px;
-  font-size: 14px; outline: none; font-family: inherit;
+#login-box {
+  width: 340px; max-width: 88vw; text-align: center;
 }
-.form-group input:focus, .form-group select:focus { border-color: #007aff; }
-.form-hint { font-size: 12px; color: #999; margin-top: 3px; }
-#settings-box .actions { display: flex; gap: 10px; margin-top: 22px; }
-#settings-box .actions button {
-  flex: 1; padding: 10px; border-radius: 8px; font-size: 14px; cursor: pointer; border: none; transition: opacity .15s;
+#login-overlay.hidden { display: none; }
+
+/* ===== 手机适配 ===== */
+@media (max-width: 768px) {
+  body { flex-direction: column; }
+  #sidebar {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 100;
+    border-left: none; transform: translateX(100%); transition: transform .25s ease;
+  }
+  #sidebar.hidden { display: block; transform: translateX(100%); }
+  #sidebar:not(.hidden) { transform: translateX(0); }
+  .msg { max-width: 90%; font-size: 15px; }
+  #settings-box { width: 95vw; padding: 20px 18px; }
+  .header-btn { padding: 8px 12px; font-size: 14px; }
+  #input-area { padding: 10px 12px; }
+  #input-area textarea { font-size: 16px; padding: 10px 12px; }
+  #input-area button { padding: 10px 18px; font-size: 16px; }
+  #messages { padding: 14px 12px; }
+  .char-select { max-width: 140px; font-size: 15px; }
 }
-.btn-primary { background: #007aff; color: #fff; }
-.btn-primary:hover { opacity: .85; }
-.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
-.btn-secondary { background: #f0f0f0; color: #333; }
-.btn-secondary:hover { background: #e5e5e5; }
-#settings-status { margin-top: 12px; font-size: 13px; text-align: center; }
-#settings-status.ok { color: #34c759; }
-#settings-status.err { color: #e33; }
+
+@media (max-width: 480px) {
+  header { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
+  .msg { max-width: 95%; padding: 10px 13px; font-size: 14px; }
+  #memory-badge { font-size: 11px; }
+  #login-box { width: 90vw; }
+}
 </style>
 </head>
 <body>
@@ -142,41 +148,15 @@ header {
   </div>
 </div>
 
-<!-- 设置弹窗 -->
-<div id="settings-overlay">
-  <div id="settings-box">
-    <h2>⚙️ API 设置</h2>
-    <div class="form-group">
-      <label>服务商</label>
-      <select id="s-provider" onchange="onProviderChange()">
-        <option value="openai">OpenAI 兼容</option>
-        <option value="ollama">Ollama（本地）</option>
-      </select>
-    </div>
-    <div class="form-group" id="s-key-group">
-      <label>API Key</label>
-      <div style="display:flex;gap:6px;">
-        <input id="s-key" type="password" placeholder="sk-..." autocomplete="off" style="flex:1;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;">
-        <button onclick="pasteKey()" title="从剪贴板粘贴检测" style="padding:9px 12px;border:1px solid #ddd;border-radius:8px;background:#fff;cursor:pointer;font-size:13px;white-space:nowrap;">📋 粘贴</button>
-      </div>
-    </div>
-    <div class="form-group">
-      <label>模型</label>
-      <input id="s-model" placeholder="gpt-4o-mini">
-      <div class="form-hint" id="s-model-hint"></div>
-    </div>
-    <div class="form-group">
-      <label>接口地址</label>
-      <input id="s-url" placeholder="https://api.openai.com/v1">
-      <div class="form-hint" id="s-url-hint"></div>
-    </div>
-    <div id="s-status-msg" style="margin-top:8px;font-size:13px;text-align:center;"></div>
-    <div id="settings-status"></div>
-    <button class="btn-secondary" id="btn-test" onclick="testConnection()" style="width:100%;margin-top:8px;">测试连接</button>
-    <div class="actions" style="margin-top:10px;">
-      <button class="btn-primary" id="btn-save" onclick="saveSettings()">保存并连接</button>
-      <button class="btn-secondary" id="btn-close-settings" onclick="closeSettings()">取消</button>
-    </div>
+<!-- 密码登录页 -->
+<div id="login-overlay">
+  <div id="login-box">
+    <div style="font-size:32px;margin-bottom:10px;">🔐</div>
+    <h2 style="font-size:18px;margin-bottom:6px;">需要访问密码</h2>
+    <p style="font-size:13px;color:#999;margin-bottom:20px;">输入密码后进入聊天</p>
+    <input id="login-password" type="password" placeholder="输入访问密码" onkeydown="if(event.key==='Enter')submitPassword()" style="width:100%;padding:12px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:16px;outline:none;text-align:center;">
+    <div id="login-error" style="color:#e33;font-size:13px;margin-top:8px;min-height:20px;"></div>
+    <button onclick="submitPassword()" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">进入</button>
   </div>
 </div>
 
@@ -190,7 +170,6 @@ header {
     <button class="header-btn" id="btn-memory" onclick="toggleSidebar()">记忆</button>
     <button class="header-btn" onclick="exportChat()">导出</button>
     <button class="header-btn" onclick="clearChat()">清空</button>
-    <button class="header-btn" id="btn-settings" onclick="openSettings()">⚙</button>
   </header>
 
   <div id="messages"><div class="msg system">加载中...</div></div>
@@ -238,6 +217,11 @@ header {
         <button onclick="aiGenerateChar()" id="btn-ai-gen" style="padding:8px 14px;border:none;border-radius:6px;background:#1a73e8;color:#fff;font-size:13px;cursor:pointer;white-space:nowrap;">AI 生成</button>
       </div>
       <div id="cc-ai-status" style="font-size:12px;color:#666;margin-top:4px;"></div>
+      <div id="cc-ai-progress" style="display:none;margin-top:6px;font-size:12px;color:#555;">
+        <div id="cc-prog-search">○ 搜索资料...</div>
+        <div id="cc-prog-analyze">○ 分析理解...</div>
+        <div id="cc-prog-generate">○ 生成角色卡...</div>
+      </div>
     </div>
 
     <div style="font-size:12px;color:#ccc;text-align:center;margin-bottom:12px;">—— 或手动填写 ——</div>
@@ -266,6 +250,22 @@ header {
       <label>开场白（可选）</label>
       <input id="cc-greeting" placeholder="如：你好呀！今天想聊什么？">
     </div>
+    <div class="form-group">
+      <label>价值观（可选）</label>
+      <textarea id="cc-values" rows="2" placeholder="角色的核心价值观和信仰..." style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>行为准则（可选）</label>
+      <textarea id="cc-behavior" rows="2" placeholder="什么情况下会怎么做..." style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>情感层次（可选）</label>
+      <textarea id="cc-emotion" rows="1" placeholder="表面情绪/深层情感/矛盾心理..." style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
+    </div>
+    <div class="form-group">
+      <label>知识领域（可选）</label>
+      <input id="cc-knowledge" placeholder="用逗号分隔，如：军事战略、诗词创作、哲学">
+    </div>
     <div id="cc-status" style="margin-top:8px;font-size:13px;text-align:center;"></div>
     <div class="actions" style="margin-top:16px;">
       <button id="cc-save-btn" onclick="saveCharacter()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">创建</button>
@@ -291,6 +291,20 @@ setTimeout(() => {
 
 // ===== 启动 =====
 window.onload = async () => {
+  // 先检查访问密码
+  try {
+    const authRes = await fetch('/api/check-auth');
+    if (authRes.status === 401) {
+      document.getElementById('loading-screen').style.display = 'none';
+      document.getElementById('login-overlay').classList.remove('hidden');
+      document.getElementById('login-password').focus();
+      return;
+    }
+  } catch (_) {}
+
+  // 已登录，隐藏密码页
+  document.getElementById('login-overlay').classList.add('hidden');
+
   function setStep(n, text) {
     const s = document.getElementById('step-' + n);
     if (s) { s.innerHTML = '● ' + (text || s.textContent.slice(2)); s.style.color = '#333'; }
@@ -325,10 +339,8 @@ window.onload = async () => {
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('input').focus();
     } else {
-      document.getElementById('loading-screen').style.display = 'none';
-      loadSettings();
-      document.getElementById('settings-overlay').classList.remove('hidden');
-      document.getElementById('btn-close-settings').style.display = 'none';
+      document.getElementById('loading-screen').innerHTML +=
+        '<div class="err">服务未配置 API Key，请联系管理员</div>';
     }
   } catch (e) {
     document.querySelector('#loading-screen .spinner').style.display = 'none';
@@ -363,9 +375,24 @@ async function loadCharDropdown(currentName) {
   } catch (_) {}
 }
 
+function clearCharForm() {
+  ['cc-name','cc-personality','cc-background','cc-style','cc-relationship','cc-greeting',
+   'cc-values','cc-behavior','cc-emotion','cc-knowledge','cc-ai-prompt'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('cc-ai-progress').style.display = 'none';
+  document.getElementById('cc-ai-status').textContent = '';
+  document.getElementById('cc-status').textContent = '';
+  document.getElementById('cc-title').textContent = '创建新角色';
+  document.getElementById('cc-save-btn').textContent = '创建';
+  isEditingChar = false;
+}
+
 function onCharSelect(sel) {
   if (sel.value === '__new__') {
     sel.value = lastCharName || '';
+    clearCharForm();
     document.getElementById('create-char-overlay').classList.remove('hidden');
     return;
   }
@@ -401,7 +428,7 @@ function getCharName() {
 
 function closeCreateChar() {
   document.getElementById('create-char-overlay').classList.add('hidden');
-  isEditingChar = false;
+  clearCharForm();
 }
 
 async function editCharacter() {
@@ -417,6 +444,10 @@ async function editCharacter() {
     document.getElementById('cc-style').value = data.speaking_style || '';
     document.getElementById('cc-relationship').value = data.relationship || '';
     document.getElementById('cc-greeting').value = data.greeting || '';
+    document.getElementById('cc-values').value = data.values || '';
+    document.getElementById('cc-behavior').value = data.behavior_rules || '';
+    document.getElementById('cc-emotion').value = data.emotional_layers || '';
+    document.getElementById('cc-knowledge').value = (data.knowledge_areas || []).join('、');
     document.getElementById('cc-title').textContent = '编辑角色';
     document.getElementById('cc-save-btn').textContent = '保存';
     document.getElementById('cc-ai-status').textContent = '';
@@ -458,22 +489,35 @@ async function aiGenerateChar() {
   const desc = document.getElementById('cc-ai-prompt').value.trim();
   if (!desc) { document.getElementById('cc-ai-status').textContent = '请输入角色描述'; return; }
   const btn = document.getElementById('btn-ai-gen');
-  btn.disabled = true; btn.textContent = '生成中...';
+  btn.disabled = true; btn.textContent = '搜索中...';
   document.getElementById('cc-ai-status').textContent = '';
+  document.getElementById('cc-ai-progress').style.display = 'block';
+  ['search','analyze','generate'].forEach(id => document.getElementById('cc-prog-'+id).innerHTML = '○ ' + document.getElementById('cc-prog-'+id).textContent.slice(2));
   try {
+    // Stage 1
+    document.getElementById('cc-prog-search').innerHTML = '◉ 搜索资料...';
     const res = await fetch('/api/character/generate', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ description: desc }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || '生成失败');
+    document.getElementById('cc-prog-search').innerHTML = '✓ 搜索完成';
+    document.getElementById('cc-prog-search').style.color = '#34c759';
+
     document.getElementById('cc-name').value = data.name || '';
     document.getElementById('cc-personality').value = data.personality || '';
     document.getElementById('cc-background').value = data.background || '';
     document.getElementById('cc-style').value = data.speaking_style || '';
     document.getElementById('cc-relationship').value = data.relationship_to_user || '';
     document.getElementById('cc-greeting').value = data.greeting || '';
-    document.getElementById('cc-ai-status').textContent = '✅ 已生成，可手动修改';
+    document.getElementById('cc-values').value = data.values || '';
+    document.getElementById('cc-behavior').value = data.behavior_rules || '';
+    document.getElementById('cc-emotion').value = data.emotional_layers || '';
+    document.getElementById('cc-knowledge').value = (data.knowledge_areas || []).join('、');
+    document.getElementById('cc-ai-status').textContent = data.sources_used && data.sources_used.length
+      ? '✅ 已生成（来源：' + data.sources_used.join(' + ') + '），可手动修改'
+      : '✅ 已生成，可手动修改';
     document.getElementById('cc-ai-status').style.color = '#34c759';
   } catch (e) {
     document.getElementById('cc-ai-status').textContent = '❌ ' + e.message;
@@ -491,6 +535,7 @@ async function saveCharacter() {
   btn.textContent = isEditingChar ? '保存中...' : '创建中...';
   document.getElementById('cc-status').textContent = '';
 
+  const knowledgeRaw = document.getElementById('cc-knowledge').value.trim();
   const body = {
     name: isEditingChar ? lastCharName : name,
     new_name: name,
@@ -499,6 +544,10 @@ async function saveCharacter() {
     speaking_style: document.getElementById('cc-style').value.trim(),
     relationship: document.getElementById('cc-relationship').value.trim(),
     greeting: document.getElementById('cc-greeting').value.trim(),
+    values: document.getElementById('cc-values').value.trim(),
+    behavior_rules: document.getElementById('cc-behavior').value.trim(),
+    emotional_layers: document.getElementById('cc-emotion').value.trim(),
+    knowledge_areas: knowledgeRaw ? knowledgeRaw.split(/[,、]/).map(s => s.trim()).filter(Boolean) : [],
   };
 
   try {
@@ -523,142 +572,6 @@ async function saveCharacter() {
     btn.disabled = false;
     btn.textContent = isEditingChar ? '保存' : '创建';
   }
-}
-
-// ===== 设置 =====
-const PRESETS = {
-  openai: { model: 'gpt-4o-mini', url: 'https://api.openai.com/v1', hintModel: '如 gpt-4o-mini、gpt-4o', hintUrl: 'OpenAI 官方或兼容服务地址' },
-  ollama: { model: 'qwen2.5', url: 'http://localhost:11434', hintModel: '如 qwen2.5、llama3', hintUrl: 'Ollama 服务地址，默认 http://localhost:11434' },
-};
-
-async function pasteKey() {
-  try {
-    const text = await navigator.clipboard.readText();
-    const key = text.trim();
-    if (key && (key.startsWith('sk-') || key.startsWith('sk_'))) {
-      document.getElementById('s-key').value = key;
-      document.getElementById('s-status-msg').textContent = '✅ 已检测到 API Key';
-      document.getElementById('s-status-msg').className = 'ok';
-    } else {
-      document.getElementById('s-status-msg').textContent = '❌ 剪贴板内容不是有效的 API Key';
-      document.getElementById('s-status-msg').className = 'err';
-    }
-  } catch (e) {
-    document.getElementById('s-status-msg').textContent = '❌ 无法读取剪贴板（请手动粘贴）';
-    document.getElementById('s-status-msg').className = 'err';
-  }
-}
-
-function onProviderChange() {
-  const p = document.getElementById('s-provider').value;
-  const preset = PRESETS[p];
-  document.getElementById('s-model').placeholder = preset.model;
-  document.getElementById('s-model-hint').textContent = preset.hintModel;
-  document.getElementById('s-url').placeholder = preset.url;
-  document.getElementById('s-url-hint').textContent = preset.hintUrl;
-  // 选 Ollama 时隐藏 API Key
-  document.getElementById('s-key-group').style.display = p === 'ollama' ? 'none' : 'block';
-}
-
-async function loadSettings() {
-  try {
-    const res = await fetch('/api/settings');
-    const s = await res.json();
-    document.getElementById('s-provider').value = s.provider || 'openai';
-    document.getElementById('s-key').value = '';
-    document.getElementById('s-model').value = s.model || '';
-    document.getElementById('s-url').value = s.base_url || '';
-    // 如果已经有 key 回填，显示一个提示
-    if (s.api_key && s.api_key !== '') {
-      document.getElementById('s-key').placeholder = s.api_key;
-    }
-    onProviderChange();
-  } catch (_) {}
-}
-
-async function testConnection() {
-  const btn = document.getElementById('btn-test');
-  btn.disabled = true; btn.textContent = '测试中...';
-  document.getElementById('settings-status').textContent = '';
-  document.getElementById('settings-status').className = '';
-  const provider = document.getElementById('s-provider').value;
-  let apiKey = document.getElementById('s-key').value;
-  const model = document.getElementById('s-model').value || PRESETS[provider].model;
-  const baseUrl = document.getElementById('s-url').value || PRESETS[provider].url;
-  if (apiKey.includes('***')) apiKey = '';
-  try {
-    const res = await fetch('/api/settings/test', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl }),
-    });
-    const data = await res.json();
-    const el = document.getElementById('settings-status');
-    if (res.ok) { el.textContent = '✅ ' + data.message; el.className = 'ok'; }
-    else { el.textContent = '❌ ' + (data.detail || '失败'); el.className = 'err'; }
-  } catch (e) {
-    const el = document.getElementById('settings-status');
-    el.textContent = '❌ 请求失败'; el.className = 'err';
-  } finally {
-    btn.disabled = false; btn.textContent = '测试连接';
-  }
-}
-
-async function saveSettings() {
-  const btn = document.getElementById('btn-save');
-  btn.disabled = true;
-  btn.textContent = '连接中...';
-  document.getElementById('settings-status').textContent = '';
-  document.getElementById('settings-status').className = '';
-
-  const provider = document.getElementById('s-provider').value;
-  let apiKey = document.getElementById('s-key').value;
-  const model = document.getElementById('s-model').value || PRESETS[provider].model;
-  const baseUrl = document.getElementById('s-url').value || PRESETS[provider].url;
-
-  // 如果 key 是脱敏显示的占位符，清空（让后端用已有的）
-  if (apiKey.includes('***')) apiKey = '';
-
-  try {
-    const res = await fetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, api_key: apiKey, model, base_url: baseUrl }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || '保存失败');
-
-    configured = true;
-    document.getElementById('settings-overlay').classList.add('hidden');
-    document.getElementById('btn-close-settings').style.display = 'block';
-
-    const statusEl = document.getElementById('settings-status');
-    statusEl.textContent = '✅ ' + data.message;
-    statusEl.className = 'ok';
-
-    // 首次配置时加载角色下拉框
-    const s = await fetch('/api/status').then(r => r.json());
-    if (s.character) await loadCharDropdown(s.character);
-    showMessage('system', '💬 ' + (s.greeting || '配置完成，开始聊天吧！'));
-    updateBadge(s.memory_count);
-    document.getElementById('input').focus();
-  } catch (e) {
-    const statusEl = document.getElementById('settings-status');
-    statusEl.textContent = '❌ ' + e.message;
-    statusEl.className = 'err';
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '保存并连接';
-  }
-}
-
-function openSettings() {
-  document.getElementById('settings-overlay').classList.remove('hidden');
-  document.getElementById('btn-close-settings').style.display = 'block';
-  loadSettings();
-}
-
-function closeSettings() {
-  document.getElementById('settings-overlay').classList.add('hidden');
 }
 
 // ===== 发送消息（流式） =====
@@ -1042,6 +955,28 @@ async function exportChat() {
     URL.revokeObjectURL(url);
   } catch (e) {
     showMessage('system', '⚠️ 导出失败');
+  }
+}
+
+// ===== 访问密码 =====
+async function submitPassword() {
+  const pwd = document.getElementById('login-password').value.trim();
+  const errEl = document.getElementById('login-error');
+  if (!pwd) { errEl.textContent = '请输入密码'; return; }
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    if (res.ok) {
+      setTimeout(() => location.reload(), 200);
+    } else {
+      errEl.textContent = '密码错误';
+      document.getElementById('login-password').value = '';
+      document.getElementById('login-password').focus();
+    }
+  } catch (e) {
+    errEl.textContent = '请求失败：' + e.message;
   }
 }
 

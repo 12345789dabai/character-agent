@@ -8,7 +8,7 @@ memory_db/
 chat_history.db
 
 # 运行日志
-server.log
+*.log
 
 # PyInstaller 打包输出
 dist/
@@ -18,3 +18,13 @@ build/
 # Python 缓存
 __pycache__/
 *.pyc
+
+# 部署脚本（含服务器密码）
+deploy.py
+
+# 临时页面
+deploy-plan.html
+
+# 虚拟环境
+venv/
+.venv/

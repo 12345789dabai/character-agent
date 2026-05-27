@@ -1,12 +1,13 @@
 """
 Web 服务器 — 后台任务 + 聊天界面 API
 """
+import hashlib
 import json
 import re
 import threading
 import uvicorn
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -15,6 +16,7 @@ from character import Character
 from memory import MemoryStore
 from llm import LLM, LLMError
 from chat_db import ChatDB
+from character_generator import generate_character as pipeline_generate
 
 # ============================================================
 # 全局状态
@@ -31,7 +33,45 @@ HISTORY_DB = str(BASE_DIR / "chat_history.db")
 # 后台任务锁：同一时刻只有一个记忆提取任务在执行
 _memory_lock = threading.Lock()
 
+# 访问密码
+ACCESS_PASSWORD = "20041209"
+ACCESS_HASH = hashlib.sha256(ACCESS_PASSWORD.encode()).hexdigest()
+
 app = FastAPI(title="永久角色对话 Agent")
+
+
+# ============================================================
+# 访问密码中间件
+# ============================================================
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # 放行登录相关路由
+    if request.url.path == "/api/login":
+        return await call_next(request)
+    # 检查 API 路由
+    if request.url.path.startswith("/api/"):
+        token = request.cookies.get("auth_token")
+        if not token or token != ACCESS_HASH:
+            return JSONResponse(status_code=401, content={"detail": "需要访问密码"})
+    return await call_next(request)
+
+
+@app.post("/api/login")
+def login(body: dict):
+    pwd = body.get("password", "")
+    if pwd == ACCESS_PASSWORD:
+        resp = JSONResponse({"ok": True})
+        resp.set_cookie(key="auth_token", value=ACCESS_HASH, httponly=True, max_age=86400 * 7, path="/")
+        return resp
+    raise HTTPException(401, "密码错误")
+
+
+@app.get("/api/check-auth")
+def check_auth(request: Request):
+    token = request.cookies.get("auth_token")
+    if not token or token != ACCESS_HASH:
+        raise HTTPException(401, "需要访问密码")
+    return {"ok": True}
 
 
 # ============================================================
@@ -86,9 +126,13 @@ def startup():
     if chars:
         active_char = chars[0][1]
         chat_db.current_char = active_char.name
-        memory_store = MemoryStore(MEMORY_DIR, active_char.name, api_config=_settings)
-        mode = "API" if memory_store._use_api_embedding else "本地"
-        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 历史 {chat_db.count()} 条 | 嵌入:{mode}")
+        try:
+            memory_store = MemoryStore(MEMORY_DIR, active_char.name, api_config=_settings)
+            mem_count = memory_store.count()
+            print(f"[就绪] 角色「{active_char.name}」| 记忆 {mem_count} 条 | 历史 {chat_db.count()} 条 | 嵌入:API")
+        except (ValueError, Exception) as e:
+            memory_store = None
+            print(f"[就绪] 角色「{active_char.name}」| 记忆未加载（请先在设置中配置 API）: {e}")
     else:
         print("[警告] characters/ 下没有角色卡")
 
@@ -120,6 +164,10 @@ class CreateCharacterBody(BaseModel):
     speaking_style: str = ""
     relationship: str = ""
     greeting: str = ""
+    values: str = ""
+    knowledge_areas: list[str] = []
+    behavior_rules: str = ""
+    emotional_layers: str = ""
 
 
 class GenerateCharacterBody(BaseModel):
@@ -134,6 +182,10 @@ class UpdateCharacterBody(BaseModel):
     speaking_style: str = ""
     relationship: str = ""
     greeting: str = ""
+    values: str = ""
+    knowledge_areas: list[str] = []
+    behavior_rules: str = ""
+    emotional_layers: str = ""
 
 
 class UpdateMemoryBody(BaseModel):
@@ -233,12 +285,17 @@ def switch_character(body: CharacterSwitchBody):
         if char.name == body.name:
             active_char = char
             chat_db.current_char = char.name
-            memory_store = MemoryStore(MEMORY_DIR, char.name, api_config=_settings)
+            try:
+                memory_store = MemoryStore(MEMORY_DIR, char.name, api_config=_settings)
+                mem_count = memory_store.count()
+            except (ValueError, Exception):
+                memory_store = None
+                mem_count = 0
             return {
                 "ok": True,
                 "character": char.name,
                 "greeting": char.greeting,
-                "memory_count": memory_store.count(),
+                "memory_count": mem_count,
                 "history_count": chat_db.count(),
             }
     raise HTTPException(404, f"角色「{body.name}」不存在")
@@ -263,6 +320,10 @@ def create_character(body: CreateCharacterBody):
         "speaking_style": body.speaking_style,
         "relationship_to_user": body.relationship,
         "greeting": body.greeting or f"你好！我是{safe}，很高兴认识你～",
+        "values": body.values,
+        "knowledge_areas": body.knowledge_areas,
+        "behavior_rules": body.behavior_rules,
+        "emotional_layers": body.emotional_layers,
     }
     char_file.write_text(
         json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -270,103 +331,40 @@ def create_character(body: CreateCharacterBody):
     return {"ok": True, "name": safe}
 
 
-def _search_web(query: str, max_results: int = 5) -> str:
-    """搜索网页并返回摘要文本，失败时返回空字符串"""
-    try:
-        from duckduckgo_search import DDGS
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-        if not results:
-            return ""
-        parts = []
-        for r in results:
-            title = r.get("title", "")
-            body = r.get("body", "")
-            if title or body:
-                parts.append(f"{title}：{body}" if title else body)
-        return "\n".join(parts)
-    except Exception:
-        return ""
-
 
 @app.post("/api/character/generate")
 def generate_character(body: GenerateCharacterBody):
-    """AI 根据描述生成角色卡（先搜索，再生成，小众角色也不怕）"""
+    """AI 四阶段生成角色卡（搜索 → 分析 → 生成 → 知识库）"""
     if not body.description.strip():
         raise HTTPException(400, "描述不能为空")
     if not llm:
         raise HTTPException(503, "请先在设置中配置 API")
 
-    # 第一步：搜索互联网获取角色信息
-    search_text = _search_web(body.description)
-
-    # 第二步：组装 prompt
-    prompt_parts = [
-        "你是一个角色创作专家。根据用户的描述，生成一个立体的角色卡，用于沉浸式对话。\n",
-    ]
-    if search_text:
-        prompt_parts.append(
-            f"以下是搜索到的参考资料（请基于这些信息，不要瞎编）：\n{search_text}\n\n"
-        )
-    prompt_parts += [
-        "要求：\n"
-        "1. 每个字段尽量丰富有细节（性格60字+，背景100字+，风格30字+）\n"
-        "2. 如果参考资料不足，根据名字和描述合理推断，不要编造具体虚假信息\n"
-        "3. 只输出 JSON，不要任何其他内容\n\n"
-        "字段：\n"
-        '  "name": "角色名"\n'
-        '  "personality": "有层次的性格描述"\n'
-        '  "background": "有细节的背景故事"\n'
-        '  "speaking_style": "说话语气、用词习惯、口头禅等"\n'
-        '  "relationship_to_user": "和用户的关系"\n'
-        '  "greeting": "符合角色身份的开场白"\n\n'
-        f"用户描述：{body.description}\n"
-    ]
-    prompt = "".join(prompt_parts)
     try:
-        resp = llm.chat([{"role": "user", "content": prompt}])
-        text = resp.strip()
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0].strip()
+        result = pipeline_generate(body.description, llm)
+        card = result["card"]
+        knowledge_base = result["knowledge_base"]
 
-        # 三级宽容解析：标准 JSON -> 修复逗号 -> 正则兜底
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            fixed = re.sub(r',\s*}', '}', text)
-            fixed = re.sub(r',\s*]', ']', fixed)
-            try:
-                data = json.loads(fixed)
-            except json.JSONDecodeError:
-                # 终极兜底：正则直接提取 "key": "value" 对
-                data = {}
-                pairs = re.findall(r'"(\w+)"\s*:\s*"([^"]*)"', text)
-                for key, value in pairs:
-                    data[key] = value
+        # 保存知识库文件
+        if knowledge_base and card.get("name"):
+            kb_path = CHARACTERS_DIR / f"{card['name']}_knowledge.txt"
+            kb_path.write_text(knowledge_base, encoding="utf-8")
 
-        required = ["name", "personality", "background", "speaking_style"]
-        if not all(k in data for k in required):
-            raise ValueError("缺少必要字段")
-        return data
+        return {
+            **card,
+            "knowledge_base": knowledge_base,
+            "sources_used": list(result["sources"].keys()),
+        }
     except Exception as e:
         raise HTTPException(500, f"AI 生成失败，请重试。错误：{e}")
 
 
 @app.get("/api/character/{name}")
 def get_character(name: str):
-    """获取单个角色完整信息（用于编辑）"""
+    """获取单个角色完整信息（含扩展字段）"""
     for path, char in Character.list_available():
         if char.name == name:
-            return {
-                "name": char.name,
-                "personality": char.personality,
-                "background": char.background,
-                "speaking_style": char.speaking_style,
-                "relationship": char.relationship,
-                "greeting": char.greeting,
-            }
+            return char.to_dict()
     raise HTTPException(404, f"角色「{name}」不存在")
 
 
@@ -392,6 +390,10 @@ def update_character(body: UpdateCharacterBody):
         "speaking_style": body.speaking_style,
         "relationship_to_user": body.relationship,
         "greeting": body.greeting or f"你好！我是{final_safe}，很高兴认识你～",
+        "values": body.values,
+        "knowledge_areas": body.knowledge_areas,
+        "behavior_rules": body.behavior_rules,
+        "emotional_layers": body.emotional_layers,
     }
 
     # 如果改了名，删旧文件建新文件
@@ -401,6 +403,10 @@ def update_character(body: UpdateCharacterBody):
         if new_file.exists():
             raise HTTPException(400, f"角色「{final_safe}」已存在")
         new_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        # 重命名知识库文件
+        old_kb = CHARACTERS_DIR / f"{safe}_knowledge.txt"
+        if old_kb.exists():
+            old_kb.rename(CHARACTERS_DIR / f"{final_safe}_knowledge.txt")
     else:
         char_file.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -417,6 +423,10 @@ def delete_character(name: str):
     if not char_file.exists():
         raise HTTPException(404, f"角色「{name}」不存在")
     char_file.unlink()
+    # 清理知识库文件
+    kb_path = CHARACTERS_DIR / f"{safe}_knowledge.txt"
+    if kb_path.exists():
+        kb_path.unlink()
     return {"ok": True, "message": f"角色「{name}」已删除"}
 
 
@@ -625,4 +635,4 @@ app.mount("/", StaticFiles(directory=str(DATA_DIR / "static"), html=True), name=
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

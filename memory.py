@@ -10,26 +10,26 @@ class MemoryStore:
     """长期记忆存储，基于 ChromaDB 向量数据库"""
 
     def __init__(self, db_path: str, character_name: str, api_config: dict | None = None):
-        # 选择嵌入方式：API 嵌入（无需本地模型）或本地嵌入
-        self._use_api_embedding = False
+        # 强制使用 API 嵌入，不加载本地模型
+        api_key = ""
+        base_url = ""
         if api_config and api_config.get("provider") == "openai":
             api_key = api_config.get("api_key", "")
             base_url = api_config.get("base_url", "")
-            # 排除已知不支持 embedding 的服务商（DeepSeek 等）
-            if api_key and "deepseek" not in base_url:
-                try:
-                    self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
-                        api_key=api_key,
-                        model_name="text-embedding-3-small",
-                    )
-                    self._use_api_embedding = True
-                except Exception:
-                    pass
 
-        if not self._use_api_embedding:
-            self.embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name="paraphrase-multilingual-MiniLM-L12-v2"
-            )
+        if not api_key:
+            raise ValueError("MemoryStore 需要 API Key 作为嵌入，请在设置中配置")
+
+        # 根据服务商选择对应的 embedding 模型
+        if "deepseek" in base_url.lower():
+            emb_model = "deepseek-embedding"
+        else:
+            emb_model = "text-embedding-3-small"
+
+        self.embedding_fn = embedding_functions.OpenAIEmbeddingFunction(
+            api_key=api_key,
+            model_name=emb_model,
+        )
 
         self.client = chromadb.PersistentClient(path=db_path)
         import hashlib
