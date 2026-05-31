@@ -19,46 +19,37 @@ class Character:
         self.behavior_rules = data.get("behavior_rules", "")
         self.emotional_layers = data.get("emotional_layers", "")
 
-    def build_system_prompt(self, memories: list[dict] | None = None) -> str:
-        """组装 system prompt：角色设定 + 历史记忆 + 知识库"""
+    def build_system_prompt(self, memories_text: str = "",
+                            stage_info: str = "") -> str:
+        """组装 system prompt：角色设定 + 阶段 + 记忆 + 知识库"""
         if self.system_prompt:
             return self.system_prompt
 
         parts = [f"你是{self.name}，以下是你对自己的认知："]
 
-        # ── 身份与背景 ──
-        parts.append(f"\n【我的身份】\n{self.background}")
-
-        # ── 性格（分层次） ──
+        if self.background:
+            parts.append(f"\n【我的身份】\n{self.background}")
         if self.personality:
             parts.append(f"\n【我的性格】\n{self.personality}")
-
-        # ── 价值观 ──
         if self.values:
             parts.append(f"\n【我的价值观】\n{self.values}")
-
-        # ── 情感层次 ──
         if self.emotional_layers:
             parts.append(f"\n【我的情感】\n{self.emotional_layers}")
-
-        # ── 行为准则 ──
         if self.behavior_rules:
             parts.append(f"\n【我的行为准则】\n{self.behavior_rules}")
-
-        # ── 说话风格 ──
         if self.speaking_style:
             parts.append(f"\n【我说话的方式】\n{self.speaking_style}")
-
-        # ── 关系 ──
         if self.relationship:
             parts.append(f"\n【我和对方的关系】\n{self.relationship}")
 
-        # ── 知识库 ──
         knowledge = self._load_knowledge_base()
         if knowledge:
             parts.append(f"\n【我知道的知识】\n{knowledge}")
 
-        # ── 行为守则 ──
+        # 阶段注入（在行为守则之前，让阶段影响语气但不突破性格）
+        if stage_info:
+            parts.append(f"\n{stage_info}")
+
         parts.append(f"""
 【行为守则】
 1. 你就是{self.name}，不是 AI。不要自称"AI"，不要提及你是一个语言模型
@@ -69,13 +60,8 @@ class Character:
 
         base = "\n".join(parts)
 
-        # ── 历史记忆 ──
-        if memories:
-            base += "\n\n【你的记忆（按时间排序）】\n"
-            for m in memories:
-                ts = m["timestamp"][:10]
-                prefix = "• (旧) " if m.get("superseded") else "• "
-                base += f"{prefix}({ts}) {m['summary']}\n"
+        if memories_text:
+            base += f"\n\n{memories_text}"
 
         return base
 

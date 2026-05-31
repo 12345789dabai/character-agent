@@ -6,56 +6,120 @@
 <title>永久角色对话</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, system-ui, sans-serif; height: 100vh; display: flex; background: #f5f5f5; }
+body {
+  font-family: -apple-system, system-ui, sans-serif;
+  height: 100vh; display: flex;
+  background: #faf6f0;
+  color: #2c3e50;
+}
+
+/* ===== 配色变量 ===== */
+:root {
+  --bg: #faf6f0;
+  --surface: #ffffff;
+  --accent: #d4a574;
+  --accent-light: #f0e4d6;
+  --text: #2c3e50;
+  --text-dim: #8a8a8a;
+  --border: #e8e0d8;
+  --shadow: rgba(0,0,0,0.06);
+  --bubble-char: #ffffff;
+  --bubble-user: #d4a574;
+  --bubble-user-text: #ffffff;
+}
 
 /* ===== 主聊天区 ===== */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 header {
-  padding: 14px 20px; background: #fff; border-bottom: 1px solid #e0e0e0;
+  padding: 14px 20px; background: var(--surface);
+  border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 10px; flex-shrink: 0;
 }
-#memory-badge { font-size: 12px; color: #888; background: #f0f0f0; padding: 2px 10px; border-radius: 10px; }
-.header-btn {
-  border: 1px solid #ddd; background: #fff; padding: 6px 12px; border-radius: 6px;
-  cursor: pointer; font-size: 13px; color: #555; transition: background .15s;
+#memory-badge {
+  font-size: 12px; color: var(--text-dim);
+  background: var(--bg); padding: 2px 10px; border-radius: 10px;
 }
-.header-btn:hover { background: #f0f0f0; }
-#btn-memory { margin-left: auto; }
-#btn-settings { font-size: 18px; padding: 4px 10px; line-height: 1; }
+.header-btn {
+  border: 1px solid var(--border); background: var(--surface);
+  padding: 6px 12px; border-radius: 8px;
+  cursor: pointer; font-size: 13px; color: var(--text);
+  transition: all .15s;
+}
+.header-btn:hover { background: var(--accent-light); border-color: var(--accent); }
 .char-select {
   font-size: 17px; font-weight: 600; border: none; background: none;
   cursor: pointer; outline: none; font-family: inherit; max-width: 200px;
+  color: var(--text);
 }
 .char-select:hover { opacity: .7; }
 
+/* 阶段标签 */
+#char-stage {
+  font-size: 11px; color: var(--accent);
+  background: var(--accent-light); padding: 3px 10px;
+  border-radius: 100px; font-weight: 500; white-space: nowrap;
+}
+
+/* 角色头像 */
+.char-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--accent-light); color: var(--accent);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600; flex-shrink: 0;
+}
+
 #messages {
-  flex: 1; overflow-y: auto; padding: 20px 20px; display: flex; flex-direction: column; gap: 14px;
+  flex: 1; overflow-y: auto; padding: 20px 20px;
+  display: flex; flex-direction: column; gap: 16px;
 }
 .msg {
-  max-width: 78%; padding: 11px 15px; border-radius: 12px; line-height: 1.6;
-  font-size: 15px; white-space: pre-wrap; word-break: break-word; animation: fadeIn .2s;
+  max-width: 78%; padding: 12px 16px; border-radius: 14px;
+  line-height: 1.6; font-size: 15px;
+  white-space: pre-wrap; word-break: break-word; animation: fadeIn .2s;
 }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.msg.user { align-self: flex-end; background: #007aff; color: #fff; border-bottom-right-radius: 4px; }
-.msg.char { align-self: flex-start; background: #fff; color: #222; border-bottom-left-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
-.msg.system { align-self: center; background: none; color: #999; font-size: 12px; padding: 4px 8px; }
-.msg .name { font-size: 12px; font-weight: 600; margin-bottom: 3px; color: #666; }
-.msg.user .name { color: rgba(255,255,255,.75); }
-.msg .typing-hint { color: #999; font-size: 14px; }
 
+.msg.user {
+  align-self: flex-end; background: var(--bubble-user); color: var(--bubble-user-text);
+  border-bottom-right-radius: 4px;
+}
+.msg.char {
+  align-self: flex-start; background: var(--bubble-char); color: var(--text);
+  border-bottom-left-radius: 4px;
+  box-shadow: 0 2px 8px var(--shadow);
+  border-left: 3px solid var(--accent);
+}
+.msg.system {
+  align-self: center; background: none; color: var(--text-dim); font-size: 12px; padding: 4px 8px;
+}
+.msg .name { font-size: 12px; font-weight: 600; margin-bottom: 3px; color: var(--text-dim); }
+.msg.user .name { color: rgba(255,255,255,.75); }
+.msg .typing-hint { color: var(--text-dim); font-size: 14px; }
+
+/* 角色消息行（头像+气泡） */
+.char-row {
+  display: flex; align-items: flex-end; gap: 8px;
+  align-self: flex-start; max-width: 85%;
+}
 
 #input-area {
-  padding: 14px 20px; background: #fff; border-top: 1px solid #e0e0e0;
+  padding: 16px 20px 20px; background: var(--surface);
+  border-top: 1px solid var(--border);
   display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0;
 }
 #input-area textarea {
-  flex: 1; border: 1px solid #ddd; border-radius: 10px; padding: 11px 14px; font-size: 15px;
-  resize: none; outline: none; font-family: inherit; line-height: 1.5; max-height: 140px;
+  flex: 1; border: 1px solid var(--border); border-radius: 12px;
+  padding: 12px 16px; font-size: 15px;
+  resize: none; outline: none; font-family: inherit; line-height: 1.5;
+  max-height: 140px; background: var(--bg);
+  transition: border-color .15s, box-shadow .15s;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.04);
 }
-#input-area textarea:focus { border-color: #007aff; }
+#input-area textarea:focus { border-color: var(--accent); box-shadow: inset 0 2px 4px rgba(0,0,0,0.04), 0 0 0 3px rgba(212,165,116,0.1); }
 #input-area button {
-  background: #007aff; color: #fff; border: none; border-radius: 10px; padding: 11px 22px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 10px; padding: 11px 22px;
   font-size: 15px; cursor: pointer; transition: opacity .15s;
 }
 #input-area button:disabled { opacity: .4; cursor: not-allowed; }
@@ -63,50 +127,60 @@ header {
 
 /* ===== 侧边栏 ===== */
 #sidebar {
-  width: 340px; background: #fff; border-left: 1px solid #e0e0e0;
+  width: 340px; background: var(--surface);
+  border-left: 1px solid var(--border);
   display: flex; flex-direction: column; flex-shrink: 0;
 }
 #sidebar.hidden { display: none; }
-#sidebar h2 { padding: 16px 20px; font-size: 15px; border-bottom: 1px solid #e0e0e0; }
+#sidebar h2 { padding: 16px 20px; font-size: 15px; border-bottom: 1px solid var(--border); }
 #memory-list { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+
 .memory-card {
-  background: #f8f9fa; border-radius: 8px; padding: 11px 13px; font-size: 14px; line-height: 1.5; border: 1px solid #eee;
+  border-radius: 10px; padding: 12px 14px; font-size: 14px;
+  line-height: 1.5; border: 1px solid var(--border);
+  box-shadow: 0 1px 4px var(--shadow);
 }
-.memory-card .time { font-size: 11px; color: #999; margin-bottom: 3px; }
-.memory-card .summary { color: #333; }
-.memory-card .facts { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
-.memory-card .facts span { background: #e8f0fe; color: #1a73e8; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+.memory-card.level-L0 { background: #fef8e7; border-left: 3px solid #d4a017; }
+.memory-card.level-L1 { background: #faf6f0; border-left: 3px solid var(--accent); }
+.memory-card.level-L2 { background: #ffffff; border-left: 3px solid #ddd6ce; }
+.memory-card.level-L3 { background: #f8f8f8; border-left: 3px solid #e8e0d8; }
+.memory-card.log-entry { background: #f5f5f5; border-left: 3px solid #ccc; }
+
+.memory-card .time { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; }
+.memory-card .summary { color: var(--text); }
 .memory-card .del { float: right; border: none; background: none; color: #ccc; cursor: pointer; font-size: 16px; padding: 0 2px; }
 .memory-card .del:hover { color: #e33; }
-.empty-memories { color: #999; text-align: center; padding: 40px 20px; font-size: 14px; }
+.empty-memories { color: var(--text-dim); text-align: center; padding: 40px 20px; font-size: 14px; }
+
+/* ===== 弹窗 ===== */
+#add-memory-overlay, #create-char-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300;
+  display: flex; align-items: center; justify-content: center;
+}
+#add-memory-overlay.hidden, #create-char-overlay.hidden { display: none; }
 
 /* ===== 启动/遮罩层 ===== */
 #loading-screen {
-  position: fixed; inset: 0; background: #fff; display: flex; flex-direction: column;
+  position: fixed; inset: 0; background: var(--bg); display: flex; flex-direction: column;
   align-items: center; justify-content: center; z-index: 100; gap: 16px;
 }
 #loading-screen .spinner {
-  width: 30px; height: 30px; border: 3px solid #e0e0e0; border-top: 3px solid #007aff;
+  width: 30px; height: 30px; border: 3px solid var(--border);
+  border-top: 3px solid var(--accent);
   border-radius: 50%; animation: spin .8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 #loading-screen .err { color: #e33; font-size: 14px; }
 
-/* ===== 设置弹窗 ===== */
-#add-memory-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 300; display: flex; align-items: center; justify-content: center; }
-#add-memory-overlay.hidden { display: none; }
-#create-char-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 250; display: flex; align-items: center; justify-content: center; }
-#create-char-overlay.hidden { display: none; }
-
 /* ===== 密码登录页 ===== */
 #login-overlay {
-  position: fixed; inset: 0; background: #fff; z-index: 500;
+  position: fixed; inset: 0; background: var(--bg); z-index: 500;
   display: flex; align-items: center; justify-content: center;
 }
-#login-box {
-  width: 340px; max-width: 88vw; text-align: center;
-}
+#login-box { width: 340px; max-width: 88vw; text-align: center; }
 #login-overlay.hidden { display: none; }
+#login-box input:focus { border-color: var(--accent) !important; }
+#login-box button { background: var(--accent) !important; }
 
 /* ===== 手机适配 ===== */
 @media (max-width: 768px) {
@@ -118,9 +192,9 @@ header {
   #sidebar.hidden { display: block; transform: translateX(100%); }
   #sidebar:not(.hidden) { transform: translateX(0); }
   .msg { max-width: 90%; font-size: 15px; }
-  #settings-box { width: 95vw; padding: 20px 18px; }
+  .char-row { max-width: 92%; }
   .header-btn { padding: 8px 12px; font-size: 14px; }
-  #input-area { padding: 10px 12px; }
+  #input-area { padding: 10px 12px 16px; }
   #input-area textarea { font-size: 16px; padding: 10px 12px; }
   #input-area button { padding: 10px 18px; font-size: 16px; }
   #messages { padding: 14px 12px; }
@@ -130,6 +204,7 @@ header {
 @media (max-width: 480px) {
   header { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
   .msg { max-width: 95%; padding: 10px 13px; font-size: 14px; }
+  .char-row { max-width: 97%; }
   #memory-badge { font-size: 11px; }
   #login-box { width: 90vw; }
 }
@@ -164,6 +239,8 @@ header {
 <div id="main">
   <header>
     <select id="char-select" onchange="onCharSelect(this)" class="char-select"></select>
+    <div class="char-avatar" id="char-avatar" style="width:28px;height:28px;font-size:12px;">智</div>
+    <span id="char-stage" style="font-size:11px;color:#d4a574;background:#f0e4d6;padding:3px 10px;border-radius:100px;font-weight:500;white-space:nowrap;"></span>
     <button class="header-btn" id="btn-edit-char" onclick="editCharacter()" title="编辑当前角色" style="font-size:13px;padding:4px 8px;">✎</button>
     <button class="header-btn" id="btn-del-char" onclick="deleteCharacter()" title="删除当前角色" style="font-size:13px;padding:4px 8px;">✕</button>
     <span id="memory-badge">0 条记忆</span>
@@ -182,12 +259,29 @@ header {
 
 <!-- 侧边栏 -->
 <div id="sidebar" class="hidden">
-  <h2>长期记忆 <span id="sidebar-count" style="font-weight:normal;color:#999;font-size:13px;"></span></h2>
+  <h2>记忆 <span id="sidebar-count" style="font-weight:normal;color:#999;font-size:13px;"></span></h2>
+  <div style="display:flex;border-bottom:1px solid #e0e0e0;">
+    <div class="tab" data-tab="L0" onclick="switchMemTab('L0')" style="flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer;border-bottom:2px solid #007aff;font-weight:600;color:#007aff;">核心</div>
+    <div class="tab" data-tab="L1" onclick="switchMemTab('L1')" style="flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer;color:#888;">重要</div>
+    <div class="tab" data-tab="L2" onclick="switchMemTab('L2')" style="flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer;color:#888;">一般</div>
+    <div class="tab" data-tab="L3" onclick="switchMemTab('L3')" style="flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer;color:#888;">琐事</div>
+    <div class="tab" data-tab="log" onclick="switchMemTab('log')" style="flex:1;padding:10px;text-align:center;font-size:13px;cursor:pointer;color:#888;">日志</div>
+  </div>
   <div style="padding:8px 16px;display:flex;gap:6px;border-bottom:1px solid #e0e0e0;">
-    <input id="memory-search" placeholder="搜索记忆..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;" oninput="filterMemories(this.value)">
+    <input id="memory-search" placeholder="搜索..." style="flex:1;padding:6px 10px;border:1px solid #ddd;border-radius:6px;font-size:13px;outline:none;" oninput="filterMemories(this.value)">
     <button onclick="showAddMemory()" style="padding:6px 12px;border:1px solid #ddd;background:#fff;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">+添加</button>
   </div>
-  <div id="memory-list"><div class="empty-memories">点击「记忆」按钮查看</div></div>
+  <div id="memory-list"><div class="empty-memories">选择一个标签查看</div></div>
+</div>
+
+<!-- 结局页面 -->
+<div id="ending-page" class="hidden" style="position:fixed;inset:0;background:#fff;z-index:600;display:none;align-items:center;justify-content:center;flex-direction:column;padding:40px;">
+  <div style="max-width:500px;text-align:center;">
+    <div style="font-size:48px;margin-bottom:16px;">🌅</div>
+    <h2 style="font-size:22px;margin-bottom:12px;">旅程的终点</h2>
+    <p id="ending-text" style="font-size:16px;color:#555;line-height:1.8;margin-bottom:24px;"></p>
+    <button onclick="location.reload()" style="padding:12px 28px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">开始新的故事</button>
+  </div>
 </div>
 
 <!-- 添加记忆弹窗 -->
@@ -195,7 +289,12 @@ header {
   <div style="background:#fff;border-radius:14px;width:400px;max-width:90vw;padding:24px 28px;box-shadow:0 8px 40px rgba(0,0,0,.15);">
     <h3 style="font-size:16px;margin-bottom:16px;">+ 添加记忆</h3>
     <textarea id="add-summary" rows="3" placeholder="记忆内容..." style="width:100%;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;resize:none;outline:none;font-family:inherit;"></textarea>
-    <input id="add-facts" placeholder="关键事实（逗号分隔，可选）" style="width:100%;margin-top:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;">
+    <select id="add-level" style="width:100%;margin-top:10px;padding:10px;border:1px solid #ddd;border-radius:8px;font-size:14px;outline:none;">
+      <option value="L0">L0 核心信念</option>
+      <option value="L1" selected>L1 重要事实</option>
+      <option value="L2">L2 一般经历</option>
+      <option value="L3">L3 日常琐事</option>
+    </select>
     <div style="display:flex;gap:10px;margin-top:16px;">
       <button onclick="saveMemory()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#007aff;color:#fff;cursor:pointer;">保存</button>
       <button onclick="closeAddMemory()" style="flex:1;padding:10px;border:none;border-radius:8px;font-size:14px;background:#f0f0f0;cursor:pointer;">取消</button>
@@ -281,11 +380,10 @@ let configured = false;
 let lastCharName = '';
 let isEditingChar = false;  // 创建弹窗是否处于编辑模式
 
-// 启动超时提示（首次需下载模型 ~400MB）
 setTimeout(() => {
   const t = document.getElementById('loading-text');
   if (t && t.textContent === '正在连接服务器...') {
-    t.textContent = '首次启动可能较慢（下载模型）...';
+    t.textContent = '连接中...';
   }
 }, 8000);
 
@@ -335,6 +433,7 @@ window.onload = async () => {
       setStep(3, '准备就绪');
       showMessage('system', '💬 ' + greeting);
       loadHistory();
+      if (data.stage) document.getElementById('char-stage').textContent = data.stage;
       await new Promise(r => setTimeout(r, 300));
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('input').focus();
@@ -414,6 +513,8 @@ async function switchCharacter(name) {
     showMessage('system', '💬 ' + data.greeting);
     updateBadge(data.memory_count);
     loadHistory();
+    updateCharAvatar(data.character);
+    if (data.stage) document.getElementById('char-stage').textContent = data.stage;
     document.getElementById('sidebar').classList.add('hidden');
     document.getElementById('input').focus();
   } catch (e) {
@@ -424,6 +525,11 @@ async function switchCharacter(name) {
 function getCharName() {
   const s = document.getElementById('char-select');
   return s.options[s.selectedIndex]?.text || '助手';
+}
+
+function updateCharAvatar(name) {
+  const avatar = document.getElementById('char-avatar');
+  if (avatar && name) avatar.textContent = name.charAt(0);
 }
 
 function closeCreateChar() {
@@ -589,16 +695,19 @@ async function send() {
   document.getElementById('send-btn').disabled = true;
   scrollBottom();
 
-  // 创建角色消息气泡 + "正在输入"占位
+  // 创建角色消息行（头像+气泡）
+  const charRow = document.createElement('div');
+  charRow.className = 'char-row';
   const charMsg = document.createElement('div');
   charMsg.className = 'msg char';
-  const charName = getCharName();
   const hintSpan = document.createElement('span');
   hintSpan.className = 'typing-hint';
   hintSpan.textContent = '正在输入...';
-  charMsg.innerHTML = '<div class="name">' + esc(charName) + '</div>';
+  charMsg.innerHTML = '<div class="name">' + esc(getCharName()) + '</div>';
   charMsg.appendChild(hintSpan);
-  document.getElementById('messages').appendChild(charMsg);
+  charRow.appendChild(avatar);
+  charRow.appendChild(charMsg);
+  document.getElementById('messages').appendChild(charRow);
 
   let started = false;
 
@@ -627,7 +736,7 @@ async function send() {
 
   // 请求最终还是失败了
   if (lastError) {
-    if (charMsg.parentNode) charMsg.remove();
+    if (charRow.parentNode) charRow.remove();
     showMessage('system', '⚠️ ' + lastError.message);
     isLoading = false;
     document.getElementById('send-btn').disabled = false;
@@ -642,7 +751,7 @@ async function send() {
       const err = await res.json();
       throw new Error(err.detail || res.statusText);
     } catch (e) {
-      if (charMsg.parentNode) charMsg.remove();
+      if (charRow.parentNode) charRow.remove();
       showMessage('system', '⚠️ ' + e.message);
       isLoading = false;
       document.getElementById('send-btn').disabled = false;
@@ -693,6 +802,15 @@ async function send() {
 
         if (data.done) {
           updateBadge(data.memory_count);
+          if (data.stage) document.getElementById('char-stage').textContent = data.stage;
+          // 检查结局
+          fetch('/api/ending').then(r => r.json()).then(ed => {
+            if (ed.ending) {
+              document.getElementById('main').style.display = 'none';
+              document.getElementById('ending-page').classList.remove('hidden');
+              document.getElementById('ending-text').textContent = ed.description || '旅程结束了';
+            }
+          }).catch(() => {});
         }
       }
     }
@@ -722,7 +840,7 @@ async function send() {
       }
     }
   } catch (e) {
-    if (charMsg.parentNode) charMsg.remove();
+    if (charRow.parentNode) charRow.remove();
     showMessage('system', '⚠️ 连接中断: ' + e.message);
   } finally {
     isLoading = false;
@@ -775,6 +893,8 @@ function scrollBottom() {
 }
 
 // ===== 侧边栏 =====
+let _currentMemTab = 'L0';
+
 function toggleSidebar() {
   const panel = document.getElementById('sidebar');
   panel.classList.toggle('hidden');
@@ -783,87 +903,86 @@ function toggleSidebar() {
   }
 }
 
+function switchMemTab(tab) {
+  _currentMemTab = tab;
+  document.querySelectorAll('.tab').forEach(el => {
+    el.style.borderBottomColor = el.dataset.tab === tab ? '#007aff' : 'transparent';
+    el.style.color = el.dataset.tab === tab ? '#007aff' : '#888';
+    el.style.fontWeight = el.dataset.tab === tab ? '600' : '400';
+  });
+  loadMemories();
+}
+
 async function loadMemories() {
   const list = document.getElementById('memory-list');
   list.innerHTML = '<div class="empty-memories">加载中...</div>';
   try {
     const res = await fetch('/api/memories');
-    const mems = await res.json();
-    if (!mems.length) {
-      list.innerHTML = '<div class="empty-memories">还没有长期记忆<br><small>多聊几轮会自动生成</small></div>';
+    const data = await res.json();
+    const bucketMap = { L0: 'L0', L1: 'L1', L2: 'L2', L3: 'L3', log: '日志' };
+    const bucket = bucketMap[_currentMemTab] || 'L0';
+    const items = data[bucket] || [];
+
+    if (!items.length) {
+      list.innerHTML = '<div class="empty-memories">这里还没有内容</div>';
       return;
     }
 
-    // 按日期分组
-    const groups = {};
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    const yesterdayStr = new Date(now - 86400000).toISOString().slice(0, 10);
-
-    mems.forEach(m => {
-      const date = m.timestamp ? m.timestamp.slice(0, 10) : '';
-      const key = date || '未知';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(m);
-    });
-
     list.innerHTML = '';
-    const dateLabels = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+    items.slice().reverse().forEach(item => {
+      const card = document.createElement('div');
+      card.className = 'memory-card level-' + (item.level || 'L2');
 
-    dateLabels.forEach(date => {
-      // 日期标题
-      let label;
-      if (date === todayStr) label = '📌 今天';
-      else if (date === yesterdayStr) label = '📌 昨天';
-      else if (date.slice(0, 4) === todayStr.slice(0, 4)) label = date.slice(5);
-      else label = date;
-
-      const title = document.createElement('div');
-      title.style.cssText = 'font-size:12px;color:#999;margin:12px 0 6px;font-weight:500;';
-      title.textContent = label;
-      list.appendChild(title);
-
-      groups[date].forEach(m => {
-        const card = document.createElement('div');
-        card.className = 'memory-card';
-
+      if (bucket !== '日志') {
         const editBtn = document.createElement('button');
         editBtn.className = 'del';
         editBtn.textContent = '✎';
         editBtn.style.marginRight = '4px';
-        editBtn.onclick = () => startEditMemory(m.id, summaryEl, editBtn);
+        editBtn.onclick = () => startEditMemory(item.id, contentEl, editBtn);
 
         const delBtn = document.createElement('button');
         delBtn.className = 'del';
         delBtn.textContent = '×';
-        delBtn.onclick = () => deleteMemory(m.id, card);
+        delBtn.onclick = () => deleteMemory(item.id, card);
 
         const time = document.createElement('div');
         time.className = 'time';
-        time.textContent = m.timestamp ? m.timestamp.slice(11, 16) : '';
+        let timeText = item.created ? item.created.slice(0, 10) : '';
+        if (item.expires) timeText += ' ～' + item.expires.slice(0, 10);
+        time.textContent = timeText;
 
-        const summaryEl = document.createElement('div');
-        summaryEl.className = 'summary';
-        summaryEl.textContent = m.summary;
+        const badge = document.createElement('div');
+        badge.style.cssText = 'font-size:11px;color:#666;margin-top:4px;';
+        const src = item.source === 'self' ? '自己说的' : item.source === 'user' ? '对方说的' : '';
+        const w = item.weight || 1.0;
+        const em = item.emotion_intensity || 0;
+        const emoji = em > 0.7 ? '🔥' : em > 0.4 ? '📌' : '💭';
+        badge.textContent = `${emoji} 权重:${w.toFixed(1)} 情绪:${em.toFixed(1)}`;
+        if (src) badge.textContent += ` | ${src}`;
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'summary';
+        contentEl.textContent = item.content;
 
         card.appendChild(editBtn);
         card.appendChild(delBtn);
         card.appendChild(time);
-        card.appendChild(summaryEl);
+        if (badge.textContent) card.appendChild(badge);
+        card.appendChild(contentEl);
+      } else {
+        card.className = 'memory-card log-entry';
+        const time = document.createElement('div');
+        time.className = 'time';
+        time.textContent = item.time ? item.time.slice(0, 16) : '';
+        const contentEl = document.createElement('div');
+        contentEl.className = 'summary';
+        contentEl.textContent = item.content;
 
-        if (m.facts && m.facts.length) {
-          const facts = document.createElement('div');
-          facts.className = 'facts';
-          m.facts.forEach(f => {
-            const span = document.createElement('span');
-            span.textContent = f;
-            facts.appendChild(span);
-          });
-          card.appendChild(facts);
-        }
+        card.appendChild(time);
+        card.appendChild(contentEl);
+      }
 
-        list.appendChild(card);
-      });
+      list.appendChild(card);
     });
   } catch (e) {
     list.innerHTML = '<div class="empty-memories">加载失败：' + e.message + '</div>';
@@ -871,11 +990,10 @@ async function loadMemories() {
 }
 
 async function deleteMemory(id, cardEl) {
-  if (!confirm('删除这条记忆？')) return;
+  if (!confirm('删除这条记录？')) return;
   try {
     await fetch('/api/memories/' + encodeURIComponent(id), { method: 'DELETE' });
     cardEl.remove();
-    updateBadge(document.querySelectorAll('.memory-card').length);
   } catch (_) { alert('删除失败'); }
 }
 
@@ -908,7 +1026,6 @@ async function saveEditMemory(id, input, btn, orig) {
       body: JSON.stringify({ summary: val }),
     });
     if (!res.ok) throw new Error();
-    // 替换回显示模式
     const summaryEl = document.createElement('div');
     summaryEl.className = 'summary';
     summaryEl.textContent = val;
@@ -993,13 +1110,13 @@ function closeAddMemory() {
 async function saveMemory() {
   const summary = document.getElementById('add-summary').value.trim();
   if (!summary) return;
-  const facts = document.getElementById('add-facts').value.split(',').map(s => s.trim()).filter(Boolean);
+  const level = document.getElementById('add-level').value;
   const btn = document.querySelector('#add-memory-overlay button');
   btn.disabled = true; btn.textContent = '保存中...';
   try {
     const res = await fetch('/api/memories', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ summary, facts }),
+      body: JSON.stringify({ summary }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail);

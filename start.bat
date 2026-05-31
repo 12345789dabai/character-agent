@@ -7,10 +7,16 @@ echo   Character Agent v1.0
 echo ========================================
 echo.
 
-echo [1/3] Starting server ...
+echo [1/3] Stopping old server on port 8000 ...
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
+    taskkill /F /PID %%a >nul 2>&1
+)
+ping -n 2 127.0.0.1 > nul
+
+echo [2/3] Starting server ...
 start /B python web_app.py > server.log 2>&1
 
-echo [2/3] Waiting for server ready ...
+echo [3/3] Waiting for server ready ...
 set retries=0
 
 :wait_loop
@@ -21,10 +27,10 @@ if %retries% gtr 15 (
     pause
     exit /b
 )
-powershell -Command "try { (Invoke-WebRequest -Uri 'http://127.0.0.1:8000/api/status' -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch { exit 1 }" > nul 2>&1
+powershell -Command "try { (Invoke-WebRequest -Uri 'http://127.0.0.1:8000/' -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200 } catch { exit 1 }" > nul 2>&1
 if errorlevel 1 goto wait_loop
 
-echo [3/3] Server ready, opening browser ...
+echo [4/4] Server ready, opening browser ...
 start http://127.0.0.1:8000
 
 echo.

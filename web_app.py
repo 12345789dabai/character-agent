@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import threading
+from datetime import datetime
 import uvicorn
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -74,6 +75,17 @@ def check_auth(request: Request):
     return {"ok": True}
 
 
+@app.get("/api/ending")
+def check_ending():
+    """检查角色是否到达结局"""
+    if not memory_store:
+        return {"ending": False}
+    try:
+        return memory_store.get_lifecycle().check_ending()
+    except Exception:
+        return {"ending": False}
+
+
 # ============================================================
 # 设置持久化
 # ============================================================
@@ -126,13 +138,8 @@ def startup():
     if chars:
         active_char = chars[0][1]
         chat_db.current_char = active_char.name
-        try:
-            memory_store = MemoryStore(MEMORY_DIR, active_char.name, api_config=_settings)
-            mem_count = memory_store.count()
-            print(f"[就绪] 角色「{active_char.name}」| 记忆 {mem_count} 条 | 历史 {chat_db.count()} 条 | 嵌入:API")
-        except (ValueError, Exception) as e:
-            memory_store = None
-            print(f"[就绪] 角色「{active_char.name}」| 记忆未加载（请先在设置中配置 API）: {e}")
+        memory_store = MemoryStore(MEMORY_DIR, active_char.name)
+        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 历史 {chat_db.count()} 条")
     else:
         print("[警告] characters/ 下没有角色卡")
 
@@ -206,6 +213,12 @@ class AddMemoryBody(BaseModel):
 @app.get("/api/status")
 def get_status():
     last_time = chat_db.last_message_time() if chat_db else None
+    stage = ""
+    if memory_store:
+        try:
+            stage = memory_store.get_lifecycle().get_lc().get("阶段名", "")
+        except Exception:
+            pass
     return {
         "configured": llm is not None,
         "character": active_char.name if active_char else None,
@@ -213,6 +226,7 @@ def get_status():
         "memory_count": memory_store.count() if memory_store else 0,
         "history_count": chat_db.count() if chat_db else 0,
         "last_message_time": last_time,
+        "stage": stage,
     }
 
 
@@ -285,17 +299,12 @@ def switch_character(body: CharacterSwitchBody):
         if char.name == body.name:
             active_char = char
             chat_db.current_char = char.name
-            try:
-                memory_store = MemoryStore(MEMORY_DIR, char.name, api_config=_settings)
-                mem_count = memory_store.count()
-            except (ValueError, Exception):
-                memory_store = None
-                mem_count = 0
+            memory_store = MemoryStore(MEMORY_DIR, char.name)
             return {
                 "ok": True,
                 "character": char.name,
                 "greeting": char.greeting,
-                "memory_count": mem_count,
+                "memory_count": memory_store.count(),
                 "history_count": chat_db.count(),
             }
     raise HTTPException(404, f"角色「{body.name}」不存在")
@@ -432,17 +441,26 @@ def delete_character(name: str):
 
 @app.post("/api/chat")
 def chat(req: ChatRequest, background: BackgroundTasks):
-    """非流式版（查询重写 + 过滤检索）"""
     if not all([llm, active_char, memory_store, chat_db]):
         raise HTTPException(503, "系统未初始化")
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
 
-    # 查询重写 — 消除指代
-    rewritten = llm.rewrite_query(user_input, chat_db.get_last_n(4))
-    memories = memory_store.search(rewritten, n_results=TOP_K_MEMORIES, threshold=SIMILARITY_THRESHOLD)
-    system_prompt = active_char.build_system_prompt(memories)
+    # 时间推进
+    lc = memory_store.get_lifecycle()
+    last_active = lc.get_lc().get("最后活跃")
+    gap = 0
+    if last_active:
+        try:
+            gap = (datetime.now() - datetime.fromisoformat(last_active)).total_seconds()
+        except Exception:
+            pass
+    lc.advance(offline_hours=0, gap_seconds=gap)
+
+    memories = memory_store.format_for_prompt()
+    stage_info = memory_store.get_lifecycle().get_stage_prompt(active_char.name)
+    system_prompt = active_char.build_system_prompt(memories_text=memories, stage_info=stage_info)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
     messages.append({"role": "user", "content": user_input})
@@ -452,43 +470,45 @@ def chat(req: ChatRequest, background: BackgroundTasks):
     except LLMError as e:
         raise HTTPException(500, str(e))
 
-    # 构建上下文给后台任务（当前轮之前的对话）
-    ctx = chat_db.get_last_n(4)
-    ctx_lines = [f"{'用户' if m['role']=='user' else '角色'}: {m['content']}" for m in ctx]
-    context_text = "\n".join(ctx_lines)
-
     chat_db.add("user", user_input)
     chat_db.add("assistant", response)
-    background.add_task(_extract_memory_background, user_input, response, active_char.name, context_text)
+    background.add_task(_extract_memory_background, user_input, response, active_char.name, "")
 
     return {
         "reply": response,
         "character_name": active_char.name,
         "memory_count": memory_store.count(),
+        "stage": lc.get_lc().get("阶段名", ""),
     }
 
 
 @app.post("/api/chat/stream")
 def chat_stream(req: ChatRequest, background: BackgroundTasks):
-    """流式版（查询重写 + 过滤检索）"""
     if not all([llm, active_char, memory_store, chat_db]):
         raise HTTPException(503, "系统未初始化")
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
 
-    # 查询重写 — 消除指代
-    rewritten = llm.rewrite_query(user_input, chat_db.get_last_n(4))
-    memories = memory_store.search(rewritten, n_results=TOP_K_MEMORIES, threshold=SIMILARITY_THRESHOLD)
-    system_prompt = active_char.build_system_prompt(memories)
+    # 时间推进
+    lc = memory_store.get_lifecycle()
+    last_active = lc.get_lc().get("最后活跃")
+    gap = 0
+    if last_active:
+        try:
+            gap = (datetime.now() - datetime.fromisoformat(last_active)).total_seconds()
+        except Exception:
+            pass
+    lc.advance(offline_hours=0, gap_seconds=gap)
+
+    memories = memory_store.format_for_prompt()
+    stage_info = memory_store.get_lifecycle().get_stage_prompt(active_char.name)
+    system_prompt = active_char.build_system_prompt(memories_text=memories, stage_info=stage_info)
+    stage_info = memory_store.get_lifecycle().get_stage_prompt(active_char.name)
+    system_prompt = active_char.build_system_prompt(memories_text=memories, stage_info=stage_info)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
     messages.append({"role": "user", "content": user_input})
-
-    # 捕获上下文给后台任务（闭包内访问）
-    ctx = chat_db.get_last_n(4)
-    ctx_lines = [f"{'用户' if m['role']=='user' else '角色'}: {m['content']}" for m in ctx]
-    context_text = "\n".join(ctx_lines)
 
     def event_stream():
         full_response = ""
@@ -502,7 +522,7 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
 
         chat_db.add("user", user_input)
         chat_db.add("assistant", full_response)
-        background.add_task(_extract_memory_background, user_input, full_response, active_char.name, context_text)
+        background.add_task(_extract_memory_background, user_input, full_response, active_char.name, "")
 
         yield f"data: {json.dumps({'done': True, 'memory_count': memory_store.count(), 'character_name': active_char.name})}\n\n"
 
@@ -518,37 +538,30 @@ def get_history():
 
 @app.get("/api/memories")
 def list_memories():
-    if not memory_store:
-        return []
-    return memory_store.get_all(limit=100)
+    if not active_char:
+        return {"L0": [], "L1": [], "L2": [], "L3": [], "日志": []}
+    ms = MemoryStore(MEMORY_DIR, active_char.name)
+    return ms.get_all()
 
 
 @app.post("/api/memories")
 def add_memory(body: AddMemoryBody):
-    """手动添加一条记忆"""
     if not memory_store:
         raise HTTPException(503, "记忆系统未初始化")
     if not body.summary.strip():
         raise HTTPException(400, "记忆内容不能为空")
-    memory_store.add_memory(
-        summary=body.summary,
-        facts=body.facts,
-        topics=body.topics,
-    )
+    memory_store.add(content=body.summary, level="L1")
     return {"ok": True, "memory_count": memory_store.count()}
 
 
 @app.patch("/api/memories/{memory_id}")
 def update_memory(memory_id: str, body: UpdateMemoryBody):
-    """编辑一条记忆"""
     if not memory_store:
         raise HTTPException(503, "记忆系统未初始化")
-    memory_store.update_memory(
-        memory_id=memory_id,
-        summary=body.summary,
-        facts=body.facts,
-        topics=body.topics,
-    )
+    content = body.summary or ""
+    if not content:
+        raise HTTPException(400, "内容不能为空")
+    memory_store.update(memory_id=memory_id, content=content)
     return {"ok": True}
 
 
@@ -556,7 +569,7 @@ def update_memory(memory_id: str, body: UpdateMemoryBody):
 def delete_memory(memory_id: str):
     if not memory_store:
         raise HTTPException(503, "记忆系统未初始化")
-    memory_store.delete_memory(memory_id)
+    memory_store.delete(memory_id)
     return {"ok": True}
 
 
@@ -592,38 +605,58 @@ def _extract_memory_background(user_msg: str, assistant_msg: str, character_name
         return
 
     try:
-        if context_text:
-            history_text = f"{context_text}\n用户: {user_msg}\n角色: {assistant_msg}"
-        else:
-            history_text = f"用户: {user_msg}\n角色: {assistant_msg}"
+        history_text = f"用户: {user_msg}\n角色: {assistant_msg}"
 
-        mem_store = MemoryStore(MEMORY_DIR, character_name, api_config=_settings)
+        mem_store = MemoryStore(MEMORY_DIR, character_name)
+        active = mem_store.get_active()
+        char_traits = active_char.personality if active_char else ""
+        char_name = character_name
 
-        old = mem_store.search_with_ids(assistant_msg, n_results=1, threshold=SIMILARITY_THRESHOLD)
-        old_summary = old[0]["summary"] if old else None
-        old_id = old[0]["id"] if old else None
-
-        data = llm.extract_memory(history_text, old_memory=old_summary)
-        if not data or not data.get("worth") or not data.get("summary"):
+        data = llm.extract_memory_v2(
+            history_text,
+            character_name=char_name,
+            character_traits=char_traits,
+            active_memories=active,
+        )
+        if not data or not data.get("worth") or not data.get("content"):
             return
 
         relation = data.get("relation")
         if relation == "duplicate":
             return
-        if relation in ("supersedes", "contradicts") and old_id:
-            mem_store.add_memory(
-                summary=data["summary"],
-                facts=data.get("facts", []),
-                topics=data.get("topics", []),
-                supersedes=old_id,
-            )
-            return
 
-        mem_store.add_memory(
-            summary=data["summary"],
-            facts=data.get("facts", []),
-            topics=data.get("topics", []),
+        if relation == "supersedes" and data.get("supersedes_id"):
+            mem_store.delete(data["supersedes_id"])
+
+        # 根据来源计算最终权重
+        source = data.get("source", "chat")
+        weight_factor = data.get("weight_factor", 1.0)
+        emotion_intensity = data.get("emotion_intensity", 0.5)
+        emotion_label = data.get("emotion_label", "")
+        WEIGHTS = {"self": 3.0, "user": 1.0, "chat": 0.5}
+        final_weight = WEIGHTS.get(source, 1.0) * weight_factor
+
+        # 检查并存储（含重复升级逻辑）
+        level = data.get("level", "L3")
+        result = mem_store.check_and_upgrade(
+            data["content"], level, emotion_intensity=emotion_intensity
         )
+        if result["action"] == "add":
+            # 新增时更新权重、来源、情绪
+            items = mem_store.get_all().get(level, [])
+            for m in items:
+                if m.get("id") == result["id"]:
+                    m["weight"] = final_weight
+                    m["source"] = source
+                    m["emotion_intensity"] = emotion_intensity
+                    break
+            mem_store._save()
+
+        # 记录情绪轨道
+        if emotion_label:
+            mem_store.add_mood(emotion_label, emotion_intensity)
+
+        mem_store.add_log(history_text)
     finally:
         _memory_lock.release()
 
