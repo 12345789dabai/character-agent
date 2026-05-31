@@ -3,6 +3,7 @@ Web 服务器 — 后台任务 + 聊天界面 API
 """
 import hashlib
 import json
+import os
 import re
 import threading
 from datetime import datetime
@@ -34,9 +35,19 @@ HISTORY_DB = str(BASE_DIR / "chat_history.db")
 # 后台任务锁：同一时刻只有一个记忆提取任务在执行
 _memory_lock = threading.Lock()
 
-# 访问密码
-ACCESS_PASSWORD = "20041209"
-ACCESS_HASH = hashlib.sha256(ACCESS_PASSWORD.encode()).hexdigest()
+# 访问密码：优先从环境变量读取，其次从 .env 文件读取
+ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "")
+if not ACCESS_PASSWORD:
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("ACCESS_PASSWORD="):
+                ACCESS_PASSWORD = line.split("=", 1)[1].strip()
+                break
+if not ACCESS_PASSWORD:
+    ACCESS_PASSWORD = ""  # 未设置则无密码保护（仅本地开发用）
+ACCESS_HASH = hashlib.sha256(ACCESS_PASSWORD.encode()).hexdigest() if ACCESS_PASSWORD else ""
 
 app = FastAPI(title="永久角色对话 Agent")
 
@@ -46,6 +57,9 @@ app = FastAPI(title="永久角色对话 Agent")
 # ============================================================
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    # 未设置密码时不做鉴权（本地开发用）
+    if not ACCESS_PASSWORD:
+        return await call_next(request)
     # 放行登录相关路由
     if request.url.path == "/api/login":
         return await call_next(request)
@@ -69,6 +83,8 @@ def login(body: dict):
 
 @app.get("/api/check-auth")
 def check_auth(request: Request):
+    if not ACCESS_PASSWORD:
+        return {"ok": True}
     token = request.cookies.get("auth_token")
     if not token or token != ACCESS_HASH:
         raise HTTPException(401, "需要访问密码")

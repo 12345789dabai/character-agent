@@ -698,6 +698,9 @@ async function send() {
   // 创建角色消息行（头像+气泡）
   const charRow = document.createElement('div');
   charRow.className = 'char-row';
+  const avatar = document.createElement('div');
+  avatar.className = 'char-avatar';
+  avatar.textContent = getCharName().charAt(0);
   const charMsg = document.createElement('div');
   charMsg.className = 'msg char';
   const hintSpan = document.createElement('span');

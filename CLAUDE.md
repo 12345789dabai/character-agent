@@ -4,75 +4,73 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-永久角色对话 Agent — 支持角色扮演的长期记忆对话系统。用户加载角色卡（JSON），与角色聊天，系统自动提取关键信息存入 ChromaDB 向量数据库，下次启动可回忆过往对话。
+有记忆和生命感的 AI 角色对话系统。角色有四层记忆（L0-L3）、情绪加权、热度衰减，并随着五阶段生命周期（相遇→告别）自然变化语气。已部署到阿里云，支持密码访问。
 
 ## 启动命令
 
 ```bash
 cd character-agent
 pip install -r requirements.txt     # 首次安装依赖
-python web_app.py                    # 启动 Web 界面（或双击 start.bat）
+# 创建 .env 文件
+echo ACCESS_PASSWORD=your_password > .env
+python web_app.py                    # 启动
 ```
 
-Web 界面访问 http://127.0.0.1:8000，首次打开需在浏览器中配置 API。
+Web 界面访问 http://127.0.0.1:8000
 
 ## 项目架构
 
 ### 入口
 
-- **`web_app.py`** — FastAPI 服务器，提供 REST API + 静态前端。短期记忆由 SQLite 持久化（`chat_db.py`），长期记忆在 ChromaDB（`memory.py`）。后台任务异步提取对话摘要。设置持久化到 `user_settings.json`。
+- **`web_app.py`** — FastAPI 服务器，REST API + 静态前端 + 密码鉴权中间件
 
 ### 核心模块
 
 | 文件 | 职责 |
 |------|------|
-| `character.py` | 角色卡加载（`Character` 类），从 `characters/*.json` 读取，生成 system prompt |
-| `memory.py` | `MemoryStore` 封装 ChromaDB，使用 sentence-transformers 多语言嵌入模型 |
-| `llm.py` | `LLM` 类封装 LLM 调用（OpenAI 兼容 / Ollama），支持流式输出 |
-| `chat_db.py` | `ChatDB` 封装 SQLite，持久化短期对话历史 |
-| `config.py` | 默认配置常量 |
+| `character.py` | 角色卡加载与管理，生成 system prompt（含阶段信息注入） |
+| `memory.py` | 四层记忆存储（L0-L3），情绪加权、热度衰减、写入审查 |
+| `lifecycle.py` | 生命周期管理：时间推进、五阶段制、结局检查 |
+| `llm.py` | LLM 调用封装（DeepSeek / OpenAI 兼容），记忆提取 |
+| `chat_db.py` | SQLite 短期对话历史 |
+| `config.py` | 所有配置（记忆层级、权重、生命周期等） |
+| `searcher.py` | 多源搜索引擎（角色生成时使用） |
+| `character_generator.py` | AI 角色生成四阶段管线 |
 
 ### 关键数据流
 
 ```
-用户输入 → memory.search() 语义检索 → character.build_system_prompt(记忆)
-    → 组装 messages → llm.chat_stream() 逐字返回 → 存入 chat_db
-    → 后台: llm.extract_memory() 判断价值 → 去重 → memory.add_memory()
+用户消息 → 时间推进 → 记忆检索（按热度排序）
+  → 组装 prompt（角色设定 + 阶段信息 + 有效记忆 + 情绪轨道）
+  → LLM 回复（流式）→ 存入 chat_db
+  → 后台：提取记忆 → 情绪标记 → 去重检查 → 写入 JSON 文件
 ```
 
-### API 路由（web_app.py）
+### 记忆系统
 
-- `GET /api/status` — 服务状态、角色、记忆数量
-- `GET/POST /api/settings` — 查看/修改 API 配置
-- `GET /api/characters` — 列出所有角色
-- `POST /api/character/switch` — 切换角色，重置对话
-- `POST /api/character/create` — 创建新角色卡
-- `POST /api/chat` — 发送消息（非流式）
-- `POST /api/chat/stream` — 发送消息（流式 SSE）
-- `GET /api/history` — 获取短期对话历史
-- `DELETE /api/history` — 清空对话
-- `GET /api/export` — 导出对话 JSON
-- `GET /api/memories` — 列出所有长期记忆
-- `POST /api/memories` — 手动添加记忆
-- `DELETE /api/memories/{id}` — 删除单条记忆
+四层结构：
+- L0 核心信念（永不过期，权重最高）
+- L1 重要事实（180天过期）
+- L2 一般经历（30天过期）
+- L3 日常琐事（3天过期）
 
-### 角色卡
+叠加机制：
+- 自述权重优先：角色自己说的话权重 3.0 vs 用户说的 1.0
+- 情绪加权：情绪强度 × 权重
+- 热度衰减：0.97 ^ 天数 × (1 + 0.1 × 访问次数)
+- 重复升级：同一内容出现 3 次自动升级
 
-`characters/*.json` 格式：
-```json
-{
-  "name": "角色名",
-  "personality": "性格描述",
-  "background": "背景故事",
-  "speaking_style": "说话风格",
-  "relationship_to_user": "和用户的关系",
-  "greeting": "开场白"
-}
-```
+### 生命周期
+
+五阶段制（梯度阈值）：
+- 相遇（100条） → 相伴（300条） → 成长（300条） → 沉淀（400条） → 告别（500条）
+
+每阶段会向 prompt 注入不同的语气描述，让角色口吻随阶段自然变化。
 
 ### 注意事项
 
-- ChromaDB 集合名 sanitize：`re.sub(r'[^a-zA-Z0-9_-]', '', name) or 'default'`
-- `memory_db/` 和 `chat_history.db` 在 `.gitignore` 中，不会提交到 git
-- API Key 明文存储在 `user_settings.json`，同样被 `.gitignore` 过滤
-- 首次启动会自动下载 paraphrase-multilingual-MiniLM-L12-v2 嵌入模型（~400MB）
+- `memory_db/` 为 JSON 文件存储，`.gitignore` 不会提交
+- 访问密码通过 `.env` 文件或环境变量 `ACCESS_PASSWORD` 设置
+- `user_settings.json`（含 API Key）在 `.gitignore` 中
+- 无本地模型依赖，纯 API 方式运行
+- 部署服务器使用 venv + nohup 守护进程
