@@ -1,7 +1,6 @@
 """
-Web 服务器 — 后台任务 + 聊天界面 API
+Web 服务器 — 多用户支持 + 聊天界面 API
 """
-import hashlib
 import json
 import os
 import re
@@ -19,147 +18,186 @@ from memory import MemoryStore
 from llm import LLM, LLMError
 from chat_db import ChatDB
 from character_generator import generate_character as pipeline_generate
+from user_db import UserDB
+from auth import generate_user_id, generate_token, verify_token, verify_api_key
 
 # ============================================================
 # 全局状态
 # ============================================================
-active_char: Character | None = None
-memory_store: MemoryStore | None = None
-chat_db: ChatDB | None = None
-llm: LLM | None = None
-_settings: dict | None = None
+user_db = UserDB()
+
+# 缓存已创建的用户数据目录
+_user_dirs_created: set[str] = set()
 
 SETTINGS_FILE = BASE_DIR / "user_settings.json"
-HISTORY_DB = str(BASE_DIR / "chat_history.db")
 
-# 后台任务锁：同一时刻只有一个记忆提取任务在执行
-_memory_lock = threading.Lock()
-
-# 访问密码：优先从环境变量读取，其次从 .env 文件读取
-ACCESS_PASSWORD = os.environ.get("ACCESS_PASSWORD", "")
-if not ACCESS_PASSWORD:
-    env_file = BASE_DIR / ".env"
-    if env_file.exists():
-        for line in env_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line.startswith("ACCESS_PASSWORD="):
-                ACCESS_PASSWORD = line.split("=", 1)[1].strip()
-                break
-if not ACCESS_PASSWORD:
-    ACCESS_PASSWORD = ""  # 未设置则无密码保护（仅本地开发用）
-ACCESS_HASH = hashlib.sha256(ACCESS_PASSWORD.encode()).hexdigest() if ACCESS_PASSWORD else ""
+# 后台任务锁（每个用户独立）
+_memory_locks: dict[str, threading.Lock] = {}
+_memory_lock_lock = threading.Lock()
 
 app = FastAPI(title="永久角色对话 Agent")
 
 
-# ============================================================
-# 访问密码中间件
-# ============================================================
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next):
-    # 未设置密码时不做鉴权（本地开发用）
-    if not ACCESS_PASSWORD:
-        return await call_next(request)
-    # 放行登录相关路由
-    if request.url.path == "/api/login":
-        return await call_next(request)
-    # 检查 API 路由
-    if request.url.path.startswith("/api/"):
-        token = request.cookies.get("auth_token")
-        if not token or token != ACCESS_HASH:
-            return JSONResponse(status_code=401, content={"detail": "需要访问密码"})
-    return await call_next(request)
+def _get_memory_lock(user_id: str) -> threading.Lock:
+    """获取用户独立的后台任务锁"""
+    with _memory_lock_lock:
+        if user_id not in _memory_locks:
+            _memory_locks[user_id] = threading.Lock()
+        return _memory_locks[user_id]
 
 
-@app.post("/api/login")
-def login(body: dict):
-    pwd = body.get("password", "")
-    if pwd == ACCESS_PASSWORD:
-        resp = JSONResponse({"ok": True})
-        resp.set_cookie(key="auth_token", value=ACCESS_HASH, httponly=True, max_age=86400 * 7, path="/")
-        return resp
-    raise HTTPException(401, "密码错误")
+def _ensure_user_dir(user_id: str):
+    """确保用户数据目录存在"""
+    if user_id in _user_dirs_created:
+        return
+    user_dir = USER_DATA_DIR / user_id
+    user_dir.mkdir(parents=True, exist_ok=True)
+    (user_dir / "memory_db").mkdir(exist_ok=True)
+    _user_dirs_created.add(user_id)
 
 
-@app.get("/api/check-auth")
-def check_auth(request: Request):
-    if not ACCESS_PASSWORD:
-        return {"ok": True}
-    token = request.cookies.get("auth_token")
-    if not token or token != ACCESS_HASH:
-        raise HTTPException(401, "需要访问密码")
-    return {"ok": True}
-
-
-@app.get("/api/ending")
-def check_ending():
-    """检查角色是否到达结局"""
-    if not memory_store:
-        return {"ending": False}
-    try:
-        return memory_store.get_lifecycle().check_ending()
-    except Exception:
-        return {"ending": False}
-
-
-# ============================================================
-# 设置持久化
-# ============================================================
-def load_settings_from_file() -> dict | None:
-    if SETTINGS_FILE.exists():
-        try:
-            return json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return None
-    return None
-
-
-def save_settings_to_file(s: dict):
-    SETTINGS_FILE.write_text(
-        json.dumps(s, indent=2, ensure_ascii=False), encoding="utf-8"
+def _get_user_llm(user_id: str) -> LLM:
+    """获取用户的 LLM 实例"""
+    user = user_db.get_user(user_id)
+    if not user:
+        raise HTTPException(401, "用户不存在")
+    return LLM(
+        provider=user["provider"],
+        model=user["model"],
+        base_url=user["base_url"],
+        api_key=user["api_key_encrypted"],  # 已经是明文存储
     )
 
 
-def apply_settings(s: dict):
-    global llm, _settings
-    _settings = s
-    provider = s.get("provider", "openai")
-    api_key = s.get("api_key", "")
-    model = s.get("model", "gpt-4o-mini")
-    base_url = s.get("base_url", "")
+# ============================================================
+# 认证中间件
+# ============================================================
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    # 放行公开路由
+    public_paths = {"/api/auth/login", "/api/auth/verify"}
+    if request.url.path in public_paths:
+        return await call_next(request)
+    # 放行静态文件
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
 
-    llm = LLM(provider=provider, model=model, base_url=base_url, api_key=api_key)
+    # 从 cookie 或 header 读取 token
+    token = request.cookies.get("auth_token") or ""
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+
+    if not token:
+        return JSONResponse(status_code=401, content={"detail": "请先登录"})
+
+    user_id = verify_token(token)
+    if not user_id:
+        return JSONResponse(status_code=401, content={"detail": "登录已过期，请重新登录"})
+
+    # 将 user_id 注入到 request.state
+    request.state.user_id = user_id
+    return await call_next(request)
 
 
 # ============================================================
-# 初始化
+# 认证 API
 # ============================================================
-@app.on_event("startup")
-def startup():
-    global active_char, memory_store, chat_db
+class LoginBody(BaseModel):
+    api_key: str
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    base_url: str = ""
 
-    chat_db = ChatDB(HISTORY_DB)
-    print(f"[就绪] 对话历史 {chat_db.count()} 条")
 
-    # 先加载设置，再创建记忆存储（支持 API 嵌入）
-    saved = load_settings_from_file()
-    if saved:
-        try:
-            apply_settings(saved)
-            print(f"[设置] 已加载：{saved['provider']} / {saved['model']}")
-        except Exception as e:
-            print(f"[设置] 加载失败：{e}")
+class VerifyBody(BaseModel):
+    api_key: str
+    provider: str = "openai"
+    model: str = "gpt-4o-mini"
+    base_url: str = ""
 
+
+@app.post("/api/auth/verify")
+def verify_key(body: VerifyBody):
+    """验证 API Key 是否有效"""
+    ok, error = verify_api_key(body.provider, body.api_key, body.model, body.base_url)
+    if ok:
+        return {"ok": True}
+    raise HTTPException(400, error)
+
+
+@app.post("/api/auth/login")
+def login(body: LoginBody):
+    """登录：验证 API Key → 创建/更新用户 → 返回 token"""
+    ok, error = verify_api_key(body.provider, body.api_key, body.model, body.base_url)
+    if not ok:
+        raise HTTPException(400, f"API Key 验证失败：{error}")
+
+    user_id = generate_user_id(body.api_key)
+    _ensure_user_dir(user_id)
+
+    # 创建或更新用户（API Key 明文存储，因为需要用来调用 LLM）
+    user_db.create_or_update(
+        user_id=user_id,
+        api_key_encrypted=body.api_key,  # 存储明文，因为 LLM 调用需要
+        provider=body.provider,
+        model=body.model,
+        base_url=body.base_url.rstrip("/"),
+    )
+
+    token = generate_token(user_id)
+    resp = JSONResponse({
+        "ok": True,
+        "user_id": user_id,
+        "token": token,
+    })
+    resp.set_cookie(
+        key="auth_token", value=token,
+        httponly=True, max_age=30 * 24 * 3600, path="/"
+    )
+    return resp
+
+
+@app.get("/api/auth/check")
+def check_auth(request: Request):
+    """检查登录状态"""
+    user_id = request.state.user_id
+    user = user_db.get_user(user_id)
+    if not user:
+        raise HTTPException(401, "用户不存在")
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "provider": user["provider"],
+        "model": user["model"],
+    }
+
+
+@app.post("/api/auth/logout")
+def logout():
+    """登出"""
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("auth_token", path="/")
+    return resp
+
+
+# ============================================================
+# 初始化（获取用户数据）
+# ============================================================
+def _get_user_components(user_id: str) -> tuple[Character | None, MemoryStore, ChatDB, LLM]:
+    """获取用户的组件：角色、记忆、对话历史、LLM"""
     chars = Character.list_available()
-    if chars:
-        active_char = chars[0][1]
-        chat_db.current_char = active_char.name
-        memory_store = MemoryStore(MEMORY_DIR, active_char.name)
-        print(f"[就绪] 角色「{active_char.name}」| 记忆 {memory_store.count()} 条 | 历史 {chat_db.count()} 条")
-    else:
-        print("[警告] characters/ 下没有角色卡")
+    active_char = chars[0][1] if chars else None
 
-    print(f"[服务] http://127.0.0.1:8000")
+    chat_db = ChatDB(str(BASE_DIR), user_id=user_id)
+    if active_char:
+        chat_db.current_char = active_char.name
+
+    memory_store = MemoryStore(str(BASE_DIR), active_char.name if active_char else "", user_id=user_id)
+    llm = _get_user_llm(user_id)
+
+    return active_char, memory_store, chat_db, llm
 
 
 # ============================================================
@@ -167,13 +205,6 @@ def startup():
 # ============================================================
 class ChatRequest(BaseModel):
     message: str
-
-
-class SettingsBody(BaseModel):
-    provider: str
-    api_key: str = ""
-    model: str = ""
-    base_url: str = ""
 
 
 class CharacterSwitchBody(BaseModel):
@@ -227,80 +258,34 @@ class AddMemoryBody(BaseModel):
 # API 路由
 # ============================================================
 @app.get("/api/status")
-def get_status():
-    last_time = chat_db.last_message_time() if chat_db else None
+def get_status(request: Request):
+    user_id = request.state.user_id
+    try:
+        active_char, memory_store, chat_db, llm = _get_user_components(user_id)
+    except Exception:
+        return {"configured": False, "character": None, "greeting": "",
+                "memory_count": 0, "history_count": 0, "last_message_time": None, "stage": ""}
+
+    last_time = chat_db.last_message_time()
     stage = ""
-    if memory_store:
-        try:
-            stage = memory_store.get_lifecycle().get_lc().get("阶段名", "")
-        except Exception:
-            pass
+    try:
+        stage = memory_store.get_lifecycle().get_lc().get("阶段名", "")
+    except Exception:
+        pass
+
     return {
-        "configured": llm is not None,
+        "configured": True,
         "character": active_char.name if active_char else None,
         "greeting": active_char.greeting if active_char else "",
-        "memory_count": memory_store.count() if memory_store else 0,
-        "history_count": chat_db.count() if chat_db else 0,
+        "memory_count": memory_store.count(),
+        "history_count": chat_db.count(),
         "last_message_time": last_time,
         "stage": stage,
     }
 
 
-@app.get("/api/settings")
-def get_settings():
-    if not _settings:
-        return {"provider": "openai", "api_key": "", "model": "gpt-4o-mini", "base_url": "https://api.openai.com/v1"}
-    s = dict(_settings)
-    if s.get("api_key"):
-        k = s["api_key"]
-        s["api_key"] = k[:6] + "..." + k[-4:] if len(k) > 12 else "********"
-    return s
-
-
-@app.post("/api/settings")
-def set_settings(body: SettingsBody):
-    s = {
-        "provider": body.provider,
-        "api_key": body.api_key,
-        "model": body.model,
-        "base_url": body.base_url.rstrip("/"),
-    }
-
-    if body.provider == "openai" and not body.api_key:
-        raise HTTPException(400, "API Key 不能为空")
-
-    try:
-        apply_settings(s)
-    except Exception as e:
-        raise HTTPException(500, f"设置应用失败：{e}")
-
-    save_settings_to_file(s)
-    return {"ok": True, "message": f"已切换到 {s['provider']} / {s['model']}"}
-
-
-@app.post("/api/settings/test")
-def test_settings(body: SettingsBody):
-    """测试 API 连接是否正常"""
-    test_key = body.api_key or _settings.get("api_key", "") if _settings else ""
-    test_model = body.model or _settings.get("model", "gpt-4o-mini") if _settings else "gpt-4o-mini"
-    test_url = body.base_url or _settings.get("base_url", "") if _settings else ""
-    test_provider = body.provider or _settings.get("provider", "openai") if _settings else "openai"
-
-    if not test_key and test_provider == "openai":
-        raise HTTPException(400, "请先输入 API Key")
-
-    test_llm = LLM(provider=test_provider, model=test_model, base_url=test_url, api_key=test_key)
-    try:
-        resp = test_llm.chat([{"role": "user", "content": "回复 OK 即可"}])
-        return {"ok": True, "message": "连接成功"}
-    except LLMError as e:
-        raise HTTPException(400, f"连接失败：{str(e)}")
-    except Exception as e:
-        raise HTTPException(400, f"连接失败：{str(e)}")
-
-
 @app.get("/api/characters")
-def list_characters():
+def list_characters(request: Request):
     return [
         {"name": c.name, "greeting": c.greeting, "relationship": c.relationship}
         for _, c in Character.list_available()
@@ -308,14 +293,14 @@ def list_characters():
 
 
 @app.post("/api/character/switch")
-def switch_character(body: CharacterSwitchBody):
+def switch_character(body: CharacterSwitchBody, request: Request):
     """切换角色（保留各自的对话历史）"""
-    global active_char, memory_store
+    user_id = request.state.user_id
     for path, char in Character.list_available():
         if char.name == body.name:
-            active_char = char
+            chat_db = ChatDB(str(BASE_DIR), user_id=user_id)
             chat_db.current_char = char.name
-            memory_store = MemoryStore(MEMORY_DIR, char.name)
+            memory_store = MemoryStore(str(BASE_DIR), char.name, user_id=user_id)
             return {
                 "ok": True,
                 "character": char.name,
@@ -327,8 +312,8 @@ def switch_character(body: CharacterSwitchBody):
 
 
 @app.post("/api/character/create")
-def create_character(body: CreateCharacterBody):
-    """创建新角色卡"""
+def create_character(body: CreateCharacterBody, request: Request):
+    """创建新角色卡（公共角色）"""
     if not body.name.strip():
         raise HTTPException(400, "角色名不能为空")
     import re
@@ -356,14 +341,17 @@ def create_character(body: CreateCharacterBody):
     return {"ok": True, "name": safe}
 
 
-
 @app.post("/api/character/generate")
-def generate_character(body: GenerateCharacterBody):
+def generate_character(body: GenerateCharacterBody, request: Request):
     """AI 四阶段生成角色卡（搜索 → 分析 → 生成 → 知识库）"""
+    user_id = request.state.user_id
     if not body.description.strip():
         raise HTTPException(400, "描述不能为空")
-    if not llm:
-        raise HTTPException(503, "请先在设置中配置 API")
+
+    try:
+        llm = _get_user_llm(user_id)
+    except Exception:
+        raise HTTPException(503, "请先登录")
 
     try:
         result = pipeline_generate(body.description, llm)
@@ -385,7 +373,7 @@ def generate_character(body: GenerateCharacterBody):
 
 
 @app.get("/api/character/{name}")
-def get_character(name: str):
+def get_character(name: str, request: Request):
     """获取单个角色完整信息（含扩展字段）"""
     for path, char in Character.list_available():
         if char.name == name:
@@ -394,7 +382,7 @@ def get_character(name: str):
 
 
 @app.put("/api/character/update")
-def update_character(body: UpdateCharacterBody):
+def update_character(body: UpdateCharacterBody, request: Request):
     """更新角色卡（支持改名）"""
     if not body.name.strip():
         raise HTTPException(400, "角色名不能为空")
@@ -439,7 +427,7 @@ def update_character(body: UpdateCharacterBody):
 
 
 @app.delete("/api/character/{name}")
-def delete_character(name: str):
+def delete_character(name: str, request: Request):
     """删除角色卡"""
     safe = re.sub(r'[\\/:*?"<>|]', '', name)
     if not safe:
@@ -456,9 +444,13 @@ def delete_character(name: str):
 
 
 @app.post("/api/chat")
-def chat(req: ChatRequest, background: BackgroundTasks):
-    if not all([llm, active_char, memory_store, chat_db]):
-        raise HTTPException(503, "系统未初始化")
+def chat(req: ChatRequest, request: Request, background: BackgroundTasks):
+    user_id = request.state.user_id
+    active_char, memory_store, chat_db, llm = _get_user_components(user_id)
+
+    if not active_char:
+        raise HTTPException(503, "没有可用角色")
+
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
@@ -488,7 +480,8 @@ def chat(req: ChatRequest, background: BackgroundTasks):
 
     chat_db.add("user", user_input)
     chat_db.add("assistant", response)
-    background.add_task(_extract_memory_background, user_input, response, active_char.name, "")
+    background.add_task(_extract_memory_background, user_input, response,
+                        active_char.name, user_id)
 
     return {
         "reply": response,
@@ -499,9 +492,13 @@ def chat(req: ChatRequest, background: BackgroundTasks):
 
 
 @app.post("/api/chat/stream")
-def chat_stream(req: ChatRequest, background: BackgroundTasks):
-    if not all([llm, active_char, memory_store, chat_db]):
-        raise HTTPException(503, "系统未初始化")
+def chat_stream(req: ChatRequest, request: Request, background: BackgroundTasks):
+    user_id = request.state.user_id
+    active_char, memory_store, chat_db, llm = _get_user_components(user_id)
+
+    if not active_char:
+        raise HTTPException(503, "没有可用角色")
+
     user_input = req.message.strip()
     if not user_input:
         raise HTTPException(400, "消息不能为空")
@@ -520,8 +517,6 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
     memories = memory_store.format_for_prompt()
     stage_info = memory_store.get_lifecycle().get_stage_prompt(active_char.name)
     system_prompt = active_char.build_system_prompt(memories_text=memories, stage_info=stage_info)
-    stage_info = memory_store.get_lifecycle().get_stage_prompt(active_char.name)
-    system_prompt = active_char.build_system_prompt(memories_text=memories, stage_info=stage_info)
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(chat_db.get_last_n(MAX_HISTORY_TURNS * 2))
     messages.append({"role": "user", "content": user_input})
@@ -538,7 +533,8 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
 
         chat_db.add("user", user_input)
         chat_db.add("assistant", full_response)
-        background.add_task(_extract_memory_background, user_input, full_response, active_char.name, "")
+        background.add_task(_extract_memory_background, user_input, full_response,
+                            active_char.name, user_id)
 
         yield f"data: {json.dumps({'done': True, 'memory_count': memory_store.count(), 'character_name': active_char.name})}\n\n"
 
@@ -546,63 +542,78 @@ def chat_stream(req: ChatRequest, background: BackgroundTasks):
 
 
 @app.get("/api/history")
-def get_history():
-    if not chat_db:
-        return []
+def get_history(request: Request):
+    user_id = request.state.user_id
+    _, _, chat_db, _ = _get_user_components(user_id)
     return chat_db.get_last_n(MAX_HISTORY_TURNS * 2)
 
 
 @app.get("/api/memories")
-def list_memories():
+def list_memories(request: Request):
+    user_id = request.state.user_id
+    chars = Character.list_available()
+    active_char = chars[0][1] if chars else None
     if not active_char:
         return {"L0": [], "L1": [], "L2": [], "L3": [], "日志": []}
-    ms = MemoryStore(MEMORY_DIR, active_char.name)
+    ms = MemoryStore(str(BASE_DIR), active_char.name, user_id=user_id)
     return ms.get_all()
 
 
 @app.post("/api/memories")
-def add_memory(body: AddMemoryBody):
-    if not memory_store:
-        raise HTTPException(503, "记忆系统未初始化")
+def add_memory(body: AddMemoryBody, request: Request):
+    user_id = request.state.user_id
+    chars = Character.list_available()
+    active_char = chars[0][1] if chars else None
+    if not active_char:
+        raise HTTPException(503, "没有可用角色")
     if not body.summary.strip():
         raise HTTPException(400, "记忆内容不能为空")
-    memory_store.add(content=body.summary, level="L1")
-    return {"ok": True, "memory_count": memory_store.count()}
+    ms = MemoryStore(str(BASE_DIR), active_char.name, user_id=user_id)
+    ms.add(content=body.summary, level="L1")
+    return {"ok": True, "memory_count": ms.count()}
 
 
 @app.patch("/api/memories/{memory_id}")
-def update_memory(memory_id: str, body: UpdateMemoryBody):
-    if not memory_store:
-        raise HTTPException(503, "记忆系统未初始化")
+def update_memory(memory_id: str, body: UpdateMemoryBody, request: Request):
+    user_id = request.state.user_id
+    chars = Character.list_available()
+    active_char = chars[0][1] if chars else None
+    if not active_char:
+        raise HTTPException(503, "没有可用角色")
     content = body.summary or ""
     if not content:
         raise HTTPException(400, "内容不能为空")
-    memory_store.update(memory_id=memory_id, content=content)
+    ms = MemoryStore(str(BASE_DIR), active_char.name, user_id=user_id)
+    ms.update(memory_id=memory_id, content=content)
     return {"ok": True}
 
 
 @app.delete("/api/memories/{memory_id}")
-def delete_memory(memory_id: str):
-    if not memory_store:
-        raise HTTPException(503, "记忆系统未初始化")
-    memory_store.delete(memory_id)
+def delete_memory(memory_id: str, request: Request):
+    user_id = request.state.user_id
+    chars = Character.list_available()
+    active_char = chars[0][1] if chars else None
+    if not active_char:
+        raise HTTPException(503, "没有可用角色")
+    ms = MemoryStore(str(BASE_DIR), active_char.name, user_id=user_id)
+    ms.delete(memory_id)
     return {"ok": True}
 
 
 @app.delete("/api/history")
-def clear_history():
+def clear_history(request: Request):
     """清空对话历史"""
-    if chat_db:
-        chat_db.clear()
+    user_id = request.state.user_id
+    _, _, chat_db, _ = _get_user_components(user_id)
+    chat_db.clear()
     return {"ok": True}
 
 
 @app.get("/api/export")
-def export_history():
+def export_history(request: Request):
     """导出对话记录为 JSON 文件"""
-    if not chat_db:
-        return []
-    from fastapi.responses import JSONResponse
+    user_id = request.state.user_id
+    _, _, chat_db, _ = _get_user_components(user_id)
     data = chat_db.get_all()
     return JSONResponse(
         content=data,
@@ -611,26 +622,51 @@ def export_history():
     )
 
 
+@app.get("/api/ending")
+def check_ending(request: Request):
+    """检查角色是否到达结局"""
+    user_id = request.state.user_id
+    chars = Character.list_available()
+    active_char = chars[0][1] if chars else None
+    if not active_char:
+        return {"ending": False}
+    try:
+        ms = MemoryStore(str(BASE_DIR), active_char.name, user_id=user_id)
+        return ms.get_lifecycle().check_ending()
+    except Exception:
+        return {"ending": False}
+
+
 # ============================================================
 # 后台任务
 # ============================================================
-def _extract_memory_background(user_msg: str, assistant_msg: str, character_name: str, context_text: str = ""):
-    """后台：提取记忆 → 与旧记忆做冲突检测 → 存入（绑定角色，不依赖全局变量）"""
-    # 前一个任务还在跑则跳过本轮，避免重复记忆和资源竞争
-    if not _memory_lock.acquire(blocking=False):
+def _extract_memory_background(user_msg: str, assistant_msg: str,
+                               character_name: str, user_id: str):
+    """后台：提取记忆 → 与旧记忆做冲突检测 → 存入"""
+    lock = _get_memory_lock(user_id)
+    if not lock.acquire(blocking=False):
         return
 
     try:
         history_text = f"用户: {user_msg}\n角色: {assistant_msg}"
 
-        mem_store = MemoryStore(MEMORY_DIR, character_name)
+        mem_store = MemoryStore(str(BASE_DIR), character_name, user_id=user_id)
         active = mem_store.get_active()
-        char_traits = active_char.personality if active_char else ""
-        char_name = character_name
+
+        # 获取角色信息
+        chars = Character.list_available()
+        char_traits = ""
+        for _, c in chars:
+            if c.name == character_name:
+                char_traits = c.personality
+                break
+
+        # 获取用户的 LLM
+        llm = _get_user_llm(user_id)
 
         data = llm.extract_memory_v2(
             history_text,
-            character_name=char_name,
+            character_name=character_name,
             character_traits=char_traits,
             active_memories=active,
         )
@@ -674,7 +710,7 @@ def _extract_memory_background(user_msg: str, assistant_msg: str, character_name
 
         mem_store.add_log(history_text)
     finally:
-        _memory_lock.release()
+        lock.release()
 
 
 # ============================================================

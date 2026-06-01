@@ -17,8 +17,13 @@ _MOOD_TRACK_SIZE = 8
 
 
 class MemoryStore:
-    def __init__(self, db_path: str, character_name: str):
-        self.file = Path(db_path) / f"{character_name}_memory.json"
+    def __init__(self, db_path: str, character_name: str, user_id: str = ""):
+        if user_id:
+            # 多用户模式：数据存到 user_data/{user_id}/memory_db/
+            self.file = Path(db_path) / "user_data" / user_id / "memory_db" / f"{character_name}_memory.json"
+        else:
+            # 单用户模式（兼容旧数据）
+            self.file = Path(db_path) / f"{character_name}_memory.json"
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self._data = {"L0": [], "L1": [], "L2": [], "L3": [],
                        "日志": [], "情绪轨道": []}

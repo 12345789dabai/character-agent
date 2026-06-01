@@ -1,11 +1,20 @@
 """短期记忆持久化 — SQLite 存储对话历史（按角色隔离）"""
 
 import sqlite3
+from pathlib import Path
 
 
 class ChatDB:
-    def __init__(self, db_path: str):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+    def __init__(self, db_path: str, user_id: str = ""):
+        if user_id:
+            # 多用户模式：数据存到 user_data/{user_id}/chat_history.db
+            db_file = Path(db_path) / "user_data" / user_id / "chat_history.db"
+            db_file.parent.mkdir(parents=True, exist_ok=True)
+            self.conn = sqlite3.connect(str(db_file), check_same_thread=False)
+        else:
+            # 单用户模式（兼容旧数据）
+            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS messages ("
             "  id INTEGER PRIMARY KEY AUTOINCREMENT,"

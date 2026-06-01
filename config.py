@@ -12,6 +12,9 @@ else:
 CHARACTERS_DIR = DATA_DIR / "characters"
 MEMORY_DIR = str(BASE_DIR / "memory_db")
 
+# 用户数据目录（多用户模式）
+USER_DATA_DIR = BASE_DIR / "user_data"
+
 # ---------- LLM 配置 ----------
 # 可选 "ollama"（免费本地）或 "openai"（需 API Key）
 LLM_PROVIDER = "ollama"

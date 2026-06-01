@@ -223,15 +223,38 @@ header {
   </div>
 </div>
 
-<!-- 密码登录页 -->
+<!-- 登录页 -->
 <div id="login-overlay">
   <div id="login-box">
-    <div style="font-size:32px;margin-bottom:10px;">🔐</div>
-    <h2 style="font-size:18px;margin-bottom:6px;">需要访问密码</h2>
-    <p style="font-size:13px;color:#999;margin-bottom:20px;">输入密码后进入聊天</p>
-    <input id="login-password" type="password" placeholder="输入访问密码" onkeydown="if(event.key==='Enter')submitPassword()" style="width:100%;padding:12px 14px;border:2px solid #e0e0e0;border-radius:10px;font-size:16px;outline:none;text-align:center;">
+    <div style="font-size:32px;margin-bottom:10px;">🤖</div>
+    <h2 style="font-size:18px;margin-bottom:6px;">登录</h2>
+    <p style="font-size:13px;color:#999;margin-bottom:20px;">输入你的 API Key 开始对话</p>
+
+    <div style="text-align:left;margin-bottom:12px;">
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 提供商</label>
+      <select id="login-provider" onchange="onProviderChange()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;background:#fff;">
+        <option value="openai">OpenAI 兼容</option>
+        <option value="ollama">Ollama (本地)</option>
+      </select>
+    </div>
+
+    <div id="login-key-group" style="text-align:left;margin-bottom:12px;">
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API Key</label>
+      <input id="login-api-key" type="password" placeholder="sk-..." onkeydown="if(event.key==='Enter')submitLogin()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+    </div>
+
+    <div style="text-align:left;margin-bottom:12px;">
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">模型</label>
+      <input id="login-model" placeholder="gpt-4o-mini" value="gpt-4o-mini" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+    </div>
+
+    <div id="login-base-url-group" style="text-align:left;margin-bottom:12px;display:none;">
+      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 地址</label>
+      <input id="login-base-url" placeholder="http://localhost:11434" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+    </div>
+
     <div id="login-error" style="color:#e33;font-size:13px;margin-top:8px;min-height:20px;"></div>
-    <button onclick="submitPassword()" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">进入</button>
+    <button onclick="submitLogin()" id="login-btn" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">验证并登录</button>
   </div>
 </div>
 
@@ -389,18 +412,18 @@ setTimeout(() => {
 
 // ===== 启动 =====
 window.onload = async () => {
-  // 先检查访问密码
+  // 先检查登录状态
   try {
-    const authRes = await fetch('/api/check-auth');
+    const authRes = await fetch('/api/auth/check');
     if (authRes.status === 401) {
       document.getElementById('loading-screen').style.display = 'none';
       document.getElementById('login-overlay').classList.remove('hidden');
-      document.getElementById('login-password').focus();
+      document.getElementById('login-api-key').focus();
       return;
     }
   } catch (_) {}
 
-  // 已登录，隐藏密码页
+  // 已登录，隐藏登录页
   document.getElementById('login-overlay').classList.add('hidden');
 
   function setStep(n, text) {
@@ -685,7 +708,7 @@ async function send() {
   const input = document.getElementById('input');
   const msg = input.value.trim();
   if (!msg || isLoading) return;
-  if (!configured) { openSettings(); return; }
+  if (!configured) { location.reload(); return; }
 
   input.value = '';
   input.style.height = 'auto';
@@ -1078,25 +1101,64 @@ async function exportChat() {
   }
 }
 
-// ===== 访问密码 =====
-async function submitPassword() {
-  const pwd = document.getElementById('login-password').value.trim();
+// ===== 登录 =====
+function onProviderChange() {
+  const provider = document.getElementById('login-provider').value;
+  const keyGroup = document.getElementById('login-key-group');
+  const urlGroup = document.getElementById('login-base-url-group');
+  const modelInput = document.getElementById('login-model');
+
+  if (provider === 'ollama') {
+    keyGroup.style.display = 'none';
+    urlGroup.style.display = 'block';
+    modelInput.value = 'qwen2.5';
+    document.getElementById('login-base-url').value = 'http://localhost:11434';
+  } else {
+    keyGroup.style.display = 'block';
+    urlGroup.style.display = 'none';
+    modelInput.value = 'gpt-4o-mini';
+  }
+}
+
+async function submitLogin() {
+  const provider = document.getElementById('login-provider').value;
+  const apiKey = document.getElementById('login-api-key').value.trim();
+  const model = document.getElementById('login-model').value.trim();
+  const baseUrl = document.getElementById('login-base-url').value.trim();
   const errEl = document.getElementById('login-error');
-  if (!pwd) { errEl.textContent = '请输入密码'; return; }
+  const btn = document.getElementById('login-btn');
+
+  if (provider === 'openai' && !apiKey) {
+    errEl.textContent = '请输入 API Key';
+    return;
+  }
+
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '验证中...';
+
   try {
-    const res = await fetch('/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: apiKey,
+        provider: provider,
+        model: model || 'gpt-4o-mini',
+        base_url: baseUrl,
+      }),
     });
+    const data = await res.json();
     if (res.ok) {
       setTimeout(() => location.reload(), 200);
     } else {
-      errEl.textContent = '密码错误';
-      document.getElementById('login-password').value = '';
-      document.getElementById('login-password').focus();
+      errEl.textContent = data.detail || '登录失败';
     }
   } catch (e) {
     errEl.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '验证并登录';
   }
 }
 
