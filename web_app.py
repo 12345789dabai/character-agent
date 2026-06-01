@@ -19,7 +19,7 @@ from llm import LLM, LLMError
 from chat_db import ChatDB
 from character_generator import generate_character as pipeline_generate
 from user_db import UserDB
-from auth import generate_user_id, generate_token, verify_token, verify_api_key
+from auth import generate_user_id, generate_token, verify_token, verify_api_key, verify_admin_password, get_admin_user_id, ADMIN_PASSWORD
 
 # ============================================================
 # 全局状态
@@ -111,6 +111,10 @@ class LoginBody(BaseModel):
     base_url: str = ""
 
 
+class AdminLoginBody(BaseModel):
+    password: str
+
+
 class VerifyBody(BaseModel):
     api_key: str
     provider: str = "openai"
@@ -157,6 +161,57 @@ def login(body: LoginBody):
         httponly=True, max_age=30 * 24 * 3600, path="/"
     )
     return resp
+
+
+@app.post("/api/auth/admin-login")
+def admin_login(body: AdminLoginBody):
+    """管理员登录：用密码登录，使用服务器预配置的 API Key"""
+    if not ADMIN_PASSWORD:
+        raise HTTPException(403, "管理员登录未启用")
+
+    if not verify_admin_password(body.password):
+        raise HTTPException(401, "密码错误")
+
+    # 读取预配置的 API Key
+    settings_file = BASE_DIR / "user_settings.json"
+    if not settings_file.exists():
+        raise HTTPException(500, "服务器未配置 API Key")
+
+    try:
+        settings = json.loads(settings_file.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(500, "读取配置失败")
+
+    admin_user_id = get_admin_user_id()
+    _ensure_user_dir(admin_user_id)
+
+    # 创建或更新管理员用户
+    user_db.create_or_update(
+        user_id=admin_user_id,
+        api_key_encrypted=settings.get("api_key", ""),
+        provider=settings.get("provider", "openai"),
+        model=settings.get("model", "gpt-4o-mini"),
+        base_url=settings.get("base_url", ""),
+    )
+
+    token = generate_token(admin_user_id)
+    resp = JSONResponse({
+        "ok": True,
+        "user_id": admin_user_id,
+        "token": token,
+        "is_admin": True,
+    })
+    resp.set_cookie(
+        key="auth_token", value=token,
+        httponly=True, max_age=30 * 24 * 3600, path="/"
+    )
+    return resp
+
+
+@app.get("/api/auth/admin-status")
+def admin_status():
+    """检查是否启用管理员登录"""
+    return {"enabled": bool(ADMIN_PASSWORD)}
 
 
 @app.get("/api/auth/check")

@@ -230,31 +230,51 @@ header {
     <h2 style="font-size:18px;margin-bottom:6px;">登录</h2>
     <p style="font-size:13px;color:#999;margin-bottom:20px;">输入你的 API Key 开始对话</p>
 
-    <div style="text-align:left;margin-bottom:12px;">
-      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 提供商</label>
-      <select id="login-provider" onchange="onProviderChange()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;background:#fff;">
-        <option value="openai">OpenAI 兼容</option>
-        <option value="ollama">Ollama (本地)</option>
-      </select>
+    <!-- 登录方式切换 -->
+    <div style="display:flex;margin-bottom:16px;background:#f5f5f5;border-radius:8px;padding:3px;">
+      <button id="tab-user" onclick="switchLoginTab('user')" style="flex:1;padding:8px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:#fff;color:#333;font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.1);">用户登录</button>
+      <button id="tab-admin" onclick="switchLoginTab('admin')" style="flex:1;padding:8px;border:none;border-radius:6px;font-size:13px;cursor:pointer;background:transparent;color:#888;">管理员</button>
     </div>
 
-    <div id="login-key-group" style="text-align:left;margin-bottom:12px;">
-      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API Key</label>
-      <input id="login-api-key" type="password" placeholder="sk-..." onkeydown="if(event.key==='Enter')submitLogin()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+    <!-- 用户登录表单 -->
+    <div id="user-login-form">
+      <div style="text-align:left;margin-bottom:12px;">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 提供商</label>
+        <select id="login-provider" onchange="onProviderChange()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;background:#fff;">
+          <option value="openai">OpenAI 兼容</option>
+          <option value="ollama">Ollama (本地)</option>
+        </select>
+      </div>
+
+      <div id="login-key-group" style="text-align:left;margin-bottom:12px;">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API Key</label>
+        <input id="login-api-key" type="password" placeholder="sk-..." onkeydown="if(event.key==='Enter')submitLogin()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+      </div>
+
+      <div style="text-align:left;margin-bottom:12px;">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">模型</label>
+        <input id="login-model" placeholder="gpt-4o-mini" value="gpt-4o-mini" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+      </div>
+
+      <div id="login-base-url-group" style="text-align:left;margin-bottom:12px;display:none;">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 地址</label>
+        <input id="login-base-url" placeholder="http://localhost:11434" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+      </div>
+
+      <div id="login-error" style="color:#e33;font-size:13px;margin-top:8px;min-height:20px;"></div>
+      <button onclick="submitLogin()" id="login-btn" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">验证并登录</button>
     </div>
 
-    <div style="text-align:left;margin-bottom:12px;">
-      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">模型</label>
-      <input id="login-model" placeholder="gpt-4o-mini" value="gpt-4o-mini" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+    <!-- 管理员登录表单 -->
+    <div id="admin-login-form" style="display:none;">
+      <div style="text-align:left;margin-bottom:12px;">
+        <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">管理员密码</label>
+        <input id="admin-password" type="password" placeholder="输入管理员密码" onkeydown="if(event.key==='Enter')submitAdminLogin()" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
+      </div>
+      <p style="font-size:12px;color:#999;margin-bottom:12px;">使用服务器预配置的 API Key，无需手动输入</p>
+      <div id="admin-login-error" style="color:#e33;font-size:13px;margin-top:8px;min-height:20px;"></div>
+      <button onclick="submitAdminLogin()" id="admin-login-btn" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#ff9500;color:#fff;font-size:16px;cursor:pointer;">管理员登录</button>
     </div>
-
-    <div id="login-base-url-group" style="text-align:left;margin-bottom:12px;display:none;">
-      <label style="font-size:13px;color:#666;display:block;margin-bottom:4px;">API 地址</label>
-      <input id="login-base-url" placeholder="http://localhost:11434" style="width:100%;padding:10px 12px;border:2px solid #e0e0e0;border-radius:8px;font-size:14px;outline:none;">
-    </div>
-
-    <div id="login-error" style="color:#e33;font-size:13px;margin-top:8px;min-height:20px;"></div>
-    <button onclick="submitLogin()" id="login-btn" style="width:100%;margin-top:16px;padding:12px;border:none;border-radius:10px;background:#007aff;color:#fff;font-size:16px;cursor:pointer;">验证并登录</button>
   </div>
 </div>
 
@@ -1102,6 +1122,40 @@ async function exportChat() {
 }
 
 // ===== 登录 =====
+let currentLoginTab = 'user';
+
+function switchLoginTab(tab) {
+  currentLoginTab = tab;
+  const userForm = document.getElementById('user-login-form');
+  const adminForm = document.getElementById('admin-login-form');
+  const tabUser = document.getElementById('tab-user');
+  const tabAdmin = document.getElementById('tab-admin');
+
+  if (tab === 'user') {
+    userForm.style.display = 'block';
+    adminForm.style.display = 'none';
+    tabUser.style.background = '#fff';
+    tabUser.style.color = '#333';
+    tabUser.style.fontWeight = '600';
+    tabUser.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    tabAdmin.style.background = 'transparent';
+    tabAdmin.style.color = '#888';
+    tabAdmin.style.fontWeight = '400';
+    tabAdmin.style.boxShadow = 'none';
+  } else {
+    userForm.style.display = 'none';
+    adminForm.style.display = 'block';
+    tabAdmin.style.background = '#fff';
+    tabAdmin.style.color = '#333';
+    tabAdmin.style.fontWeight = '600';
+    tabAdmin.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)';
+    tabUser.style.background = 'transparent';
+    tabUser.style.color = '#888';
+    tabUser.style.fontWeight = '400';
+    tabUser.style.boxShadow = 'none';
+  }
+}
+
 function onProviderChange() {
   const provider = document.getElementById('login-provider').value;
   const keyGroup = document.getElementById('login-key-group');
@@ -1159,6 +1213,40 @@ async function submitLogin() {
   } finally {
     btn.disabled = false;
     btn.textContent = '验证并登录';
+  }
+}
+
+async function submitAdminLogin() {
+  const password = document.getElementById('admin-password').value.trim();
+  const errEl = document.getElementById('admin-login-error');
+  const btn = document.getElementById('admin-login-btn');
+
+  if (!password) {
+    errEl.textContent = '请输入管理员密码';
+    return;
+  }
+
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+
+  try {
+    const res = await fetch('/api/auth/admin-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setTimeout(() => location.reload(), 200);
+    } else {
+      errEl.textContent = data.detail || '登录失败';
+    }
+  } catch (e) {
+    errEl.textContent = '请求失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '管理员登录';
   }
 }
 

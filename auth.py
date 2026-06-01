@@ -1,9 +1,10 @@
 """
-认证模块 — API Key 验证 + Token 管理
+认证模块 — API Key 验证 + Token 管理 + 管理员认证
 """
 import hashlib
 import hmac
 import json
+import os
 import time
 import requests
 from pathlib import Path
@@ -12,6 +13,29 @@ from config import BASE_DIR
 
 # Token 密钥（用于签名 JWT）
 _SECRET_FILE = BASE_DIR / ".auth_secret"
+
+# 管理员密码（从环境变量或 .env 文件读取）
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+if not ADMIN_PASSWORD:
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("ADMIN_PASSWORD="):
+                ADMIN_PASSWORD = line.split("=", 1)[1].strip()
+                break
+# 兼容旧的 ACCESS_PASSWORD
+if not ADMIN_PASSWORD:
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("ACCESS_PASSWORD="):
+                ADMIN_PASSWORD = line.split("=", 1)[1].strip()
+                break
+
+# 管理员专用 user_id
+ADMIN_USER_ID = "admin"
 
 def _get_secret() -> str:
     """获取或创建 token 签名密钥"""
@@ -110,3 +134,13 @@ def verify_api_key(provider: str, api_key: str, model: str = "",
         return False, "连接超时"
     except Exception as e:
         return False, str(e)
+
+def verify_admin_password(password: str) -> bool:
+    """验证管理员密码"""
+    if not ADMIN_PASSWORD:
+        return False
+    return password == ADMIN_PASSWORD
+
+def get_admin_user_id() -> str:
+    """获取管理员 user_id"""
+    return ADMIN_USER_ID
